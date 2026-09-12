@@ -36,11 +36,6 @@ Esta pasta consolida recomendações arquiteturais **genéricas**, não vinculad
 | [`28-push-em-tempo-real.md`](28-push-em-tempo-real.md) | Push servidor→cliente (SignalR/SSE): dica e não fonte de verdade, best-effort, `IUserNotifier`, escopo por ator, backplane em multi-réplica, conexão pela sessão |
 | [`29-modelagem-e-dados-entre-modulos.md`](29-modelagem-e-dados-entre-modulos.md) | Modelagem entre módulos: referência por id vs. snapshot vs. cópia sincronizada, invariante dentro da fronteira de consistência, invariante entre agregados, integridade sem FK cross-schema, ACL/context-mapping interno |
 
-Documento de revisão (não é regra de arquitetura, é índice de trabalho pendente):
-
-| Arquivo | Conteúdo |
-| --- | --- |
-| [`00-revisao-e-lacunas.md`](00-revisao-e-lacunas.md) | Revisão da referência contra padrões recentes de .NET/C#: decisões tomadas, defasagens, lacunas de escopo e inconsistências |
 
 ## Princípios fundamentais
 
