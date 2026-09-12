@@ -1,0 +1,35 @@
+{
+  "name": ".NET 10 + Claude Code",
+
+  "image": "mcr.microsoft.com/devcontainers/dotnet:10.0-noble",
+
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/devcontainers/features/node:2": "none"
+  },
+  
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+
+  "privileged": false,
+
+  "securityOpt": [
+    "no-new-privileges:true"
+  ],
+  "containerEnv": {
+    "CLAUDE_NO_WRAP": "1",
+    "CLAUDE_CODE_DISABLE_MOUSE_CLICKS": "1"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "remote.autoForwardPorts": false,
+        "prettier.objectWrap": "preserve"
+      }
+    }
+  }
+}
