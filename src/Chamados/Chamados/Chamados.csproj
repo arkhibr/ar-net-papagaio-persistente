@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chamados</RootNamespace>
+    <MediatorInternalHandlers>true</MediatorInternalHandlers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../SharedKernel/SharedKernel.csproj" />
+    <ProjectReference Include="../Chamados.Contracts/Chamados.Contracts.csproj" />
+    <ProjectReference Include="../../Catalogo/Catalogo.Contracts/Catalogo.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chamados.Domain.UnitTests" />
+    <InternalsVisibleTo Include="Chamados.Application.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="Mediator.SourceGenerator">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <!-- Provider EF Core para Infrastructure (persistencia-e-integracao); decisão de usar SQLite
+         em vez de SQL Server nesta rodada de testes está registrada em pacotes.md e
+         plano-de-arquitetura.md secao 8. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Tooling de design-time (dotnet ef migrations), consumido só por
+         Infrastructure/ChamadosDbContextFactory.cs (IDesignTimeDbContextFactory); nunca
+         referenciado por Domain/Application. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
+    <!-- ValidateDataAnnotations() em ChamadosOptions (arquitetura/10-configuracao-e-segredos.md),
+         usado só pelo AddChamadosModule (composição do módulo). -->
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+    <!-- OptionsBuilder<T>.Bind(...) em AddChamadosModule. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <!-- AddHealthChecks().AddDbContextCheck<ChamadosDbContext>() em AddChamadosModule
+         (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md, "cada camada
+         registra a checagem que sabe fazer; a Api só agrega em /health"). -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+  </ItemGroup>
+
+</Project>

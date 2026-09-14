@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Grafo de dependência (arquitetura/01-estrutura-de-projetos-monolito-modular.md,
+         "Api referencia só os dois .Contracts... nunca o interior de nenhum módulo"):
+         SharedKernel + {Modulo}.Contracts de cada módulo que expõe endpoint. Nenhum controller/
+         classe de composição desta Api usa um tipo internal de Chamados/Catalogo — só os DTOs/
+         Command/Query públicos de Contracts, via ISender.Send(...). -->
+    <ProjectReference Include="../SharedKernel/SharedKernel.csproj" />
+    <ProjectReference Include="../Chamados/Chamados.Contracts/Chamados.Contracts.csproj" />
+    <ProjectReference Include="../Catalogo/Catalogo.Contracts/Catalogo.Contracts.csproj" />
+    <!-- Exceção única e deliberada, espelhando o exemplo de referência do próprio arquitetura/01
+         ("Como Api compõe o sistema", árvore de arquivos com AcademicoDependencyInjection.cs
+         DENTRO de Academico/ — não em Academico.Contracts — e Program.cs chamando
+         AddAcademicoModule(...)): AddChamadosModule/AddCatalogoModule (registro de DI: DbContext,
+         repositórios, health check, handlers via Mediator.SourceGenerator) vivem no assembly
+         "fundido" de cada módulo, não em Contracts, porque são a própria composição do módulo
+         (Domain+Application+Infrastructure), não vocabulário público de caso de uso. A Api
+         referencia os dois projetos fundidos só para chamar esse único método de extensão
+         público em Program.cs — nunca instancia, referencia ou conhece qualquer tipo internal
+         de dentro deles. Mesma disciplina que o próprio documento já aceita como estrutura
+         correta, não uma divergência desta rodada. -->
+    <ProjectReference Include="../Chamados/Chamados/Chamados.csproj" />
+    <ProjectReference Include="../Catalogo/Catalogo/Catalogo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Só Mediator.Abstractions (tipos ISender/IRequest usados pelos controllers), NUNCA
+         Mediator.SourceGenerator aqui (decisão revista nesta rodada, registrada em
+         pacotes.md): o gerador, quando presente num projeto, varre TODOS os assemblies
+         referenciados em busca de IRequestHandler/INotificationHandler para gerar o próprio
+         AddMediator() local — incluindo os handlers internal de Chamados/Catalogo, que essa
+         Api referencia via ProjectReference só para chamar Add{Modulo}Module. Gerar um
+         AddMediator() aqui tentaria construir ServiceDescriptor para tipos internal de outro
+         assembly (CS0122, inacessível) — erro real encontrado ao compilar esta etapa, não
+         hipotético. A resolução correta (README do próprio pacote: "install the source
+         generator package into your edge/outermost project" pressupõe um projeto edge que NÃO
+         referencia o assembly interno de outro módulo; aqui a Api referencia os assemblies
+         fundidos só para AddChamadosModule/AddCatalogoModule, então não se qualifica como esse
+         "edge" na acepção do pacote). Cada módulo mantém o próprio Mediator.SourceGenerator e
+         chama o próprio AddMediator() gerado de dentro do próprio Add{Modulo}Module (ver
+         ChamadosDependencyInjection/CatalogoDependencyInjection) — só ele pode nomear os
+         próprios handlers internal. SharedKernel nunca precisou disso (não tem handler
+         próprio). Warning CS0436 mencionado em pacotes.md ("reavaliar se deveria ficar só no
+         edge") fica resolvido na direção oposta à cogitada: o pacote sai da Api, não dos
+         módulos. -->
+    <PackageReference Include="Mediator.Abstractions" />
+    <!-- Versionamento por segmento de URL (/api/v1), arquitetura/18-versionamento-de-api.md. -->
+    <PackageReference Include="Asp.Versioning.Mvc" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" />
+    <!-- Gerador nativo de OpenAPI (.NET 9+, recomendado em 18-versionamento-de-api.md em vez de
+         Swashbuckle). Documento mínimo, sem UI de exploração adicional nesta rodada. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+</Project>
