@@ -1,0 +1,132 @@
+// Custom Theming for Angular Material
+// For more information: https://material.angular.dev/guide/theming
+@use '@angular/material' as mat;
+
+// Design tokens adaptados de DESIGN.md (Apple-design-analysis) para uma interface utilitária
+// (tabelas, formulários, diálogos) em vez de um site de fotografia de produto — a mesma
+// linguagem (cor única de destaque, tipografia com tracking negativo, cantos em pílula para
+// ações, elevação quase nula) aplicada ao "modo utilitário" que o próprio doc descreve em
+// store-utility-card/configurator-option-chip/search-input.
+:root {
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-ink: #1d1d1f;
+  --color-ink-muted-80: #333333;
+  --color-ink-muted-48: #7a7a7a;
+  --color-divider-soft: #f0f0f0;
+  --color-hairline: #e0e0e0;
+  --color-canvas: #ffffff;
+  --color-canvas-parchment: #f5f5f7;
+  --color-surface-pearl: #fafafc;
+  --color-surface-black: #000000;
+  --color-on-primary: #ffffff;
+  --color-on-dark: #ffffff;
+
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+  --radius-pill: 9999px;
+
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 17px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+
+  --shadow-product: rgba(0, 0, 0, 0.22) 3px 5px 30px 0;
+}
+
+html {
+  @include mat.theme((
+    color: (
+      theme-type: light,
+      primary: mat.$azure-palette,
+      tertiary: mat.$blue-palette,
+    ),
+    // SF Pro é proprietária da Apple; Inter é o substituto documentado em DESIGN.md
+    // ("Note on Font Substitutes") para uso fora do ecossistema Apple.
+    typography: Inter,
+    density: 0,
+  ));
+
+  // Sobrescreve só a cor de destaque para o Action Blue exato de DESIGN.md — mantém o resto da
+  // paleta M3 (contraste, estados) gerada pela azure-palette, que já é próxima o suficiente para
+  // as tonalidades derivadas (inverse-primary etc.) não precisarem de ajuste manual.
+  --mat-sys-primary: var(--color-primary);
+  --mat-sys-on-primary: var(--color-on-primary);
+  --mat-sys-surface-tint: var(--color-primary);
+
+  --mat-sys-surface: var(--color-canvas);
+  --mat-sys-on-surface: var(--color-ink);
+  --mat-sys-background: var(--color-canvas-parchment);
+  --mat-sys-on-background: var(--color-ink);
+  --mat-sys-surface-container-lowest: var(--color-canvas);
+  --mat-sys-surface-container-low: var(--color-surface-pearl);
+  --mat-sys-surface-container: var(--color-canvas-parchment);
+  --mat-sys-outline: var(--color-hairline);
+  --mat-sys-outline-variant: var(--color-divider-soft);
+
+  // Alinha o vermelho de erro do Material com o "cor-critica" já usado nos badges de prioridade
+  // — uma única linguagem de vermelho na aplicação inteira.
+  --mat-sys-error: #d32f2f;
+  --mat-sys-on-error: #ffffff;
+
+  // Escala de cantos própria (rounded.* de DESIGN.md) — full/small já batiam com o default M3;
+  // medium/large ajustados para os valores exatos do doc.
+  --mat-sys-corner-medium: var(--radius-md);
+  --mat-sys-corner-large: var(--radius-lg);
+  // Diálogos (MatDialog) usam corner-extra-large por padrão no M3 — alinhado ao mesmo
+  // rounded.lg dos cartões, para não ter duas linguagens de canto diferentes na aplicação.
+  --mat-sys-corner-extra-large: var(--radius-lg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas-parchment);
+  color: var(--color-ink);
+  // Tracking levemente negativo em textos de leitura, "Apple tight" (DESIGN.md, Typography ›
+  // Principles) — Inter tem tracking um pouco mais aberto que SF Pro por padrão.
+  letter-spacing: -0.01em;
+}
+
+h1, h2, h3 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  margin: 0 0 var(--spacing-lg);
+}
+
+h1 {
+  font-size: 34px;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+p {
+  line-height: 1.5;
+}
+
+// Cartão utilitário (store-utility-card de DESIGN.md): fundo branco, borda fio-de-cabelo,
+// cantos grandes, sem sombra — elevação vem só da troca de superfície (branco sobre pergaminho),
+// nunca de shadow em chrome.
+.surface-card {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+}

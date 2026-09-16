@@ -1,0 +1,29 @@
+<h1>Abrir chamado</h1>
+
+<form class="surface-card" [formGroup]="form" (ngSubmit)="enviar()">
+  <mat-form-field appearance="outline">
+    <mat-label>Categoria</mat-label>
+    <mat-select formControlName="categoriaId">
+      @for (categoria of categorias(); track categoria.id) {
+        <mat-option [value]="categoria.id">{{ categoria.nome }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+
+  <mat-form-field appearance="outline">
+    <mat-label>Prioridade</mat-label>
+    <mat-select formControlName="prioridade">
+      @for (opcao of opcoesPrioridade; track opcao.valor) {
+        <mat-option [value]="opcao.valor">{{ opcao.rotulo }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+
+  @if (erroGeral()) {
+    <p class="erro">{{ erroGeral() }}</p>
+  }
+
+  <button mat-raised-button color="primary" type="submit" [disabled]="form.invalid || enviando()">
+    Abrir chamado
+  </button>
+</form>

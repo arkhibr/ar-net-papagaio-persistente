@@ -44,6 +44,13 @@ internal sealed class CatalogoUnitOfWork : IUnitOfWork
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            // Mesmo detach de ChamadosUnitOfWork.SaveChangesAsync (ver nota lá) — mantém os dois
+            // módulos com o mesmo tratamento de concorrência, mesmo sem consumidor real ainda.
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+
             throw new ConcurrencyException("O recurso foi alterado por outra operação.", ex);
         }
     }

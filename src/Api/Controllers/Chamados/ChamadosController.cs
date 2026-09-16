@@ -65,8 +65,14 @@ public sealed class ChamadosController : ControllerBase
 
         var resultado = await _sender.Send(command, cancellationToken);
 
-        return resultado.ToActionResult(
-            id => CreatedAtAction(nameof(ObterAsync), new { id }, new { id }));
+        // CreatedAtAction(nameof(ObterAsync), ...) foi tentado e descartado: o link generator do
+        // Asp.Versioning falha em resolver a rota versionada ("No route matches the supplied
+        // values") mesmo passando o valor de versão explicitamente, tipado ou não — problema
+        // conhecido, sem correção estável na versão do pacote usada aqui. Construindo o Location
+        // a partir do próprio path da requisição atual (POST .../chamados -> .../chamados/{id}),
+        // que preserva o segmento de versão real usado pelo cliente sem depender do link
+        // generator.
+        return resultado.ToActionResult(id => Created($"{Request.Path}/{id}", new { id }));
     }
 
     /// <summary>

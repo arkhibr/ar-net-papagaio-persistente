@@ -31,6 +31,15 @@ internal sealed class ChamadosUnitOfWork : IUnitOfWork
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            // Detach das entidades que causaram o conflito: o EF Core não faz isso sozinho, e
+            // sem isso o IdempotencyStore.ReleaseAsync/CompleteAsync (SaveChanges isolado, ver
+            // nota lá) tenta de novo o mesmo UPDATE que acabou de falhar, lançando uma segunda
+            // DbUpdateConcurrencyException crua (sem tradução) que mascara esta aqui.
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+
             throw new ConcurrencyException("O recurso foi alterado por outra operação.", ex);
         }
     }

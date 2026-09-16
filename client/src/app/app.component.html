@@ -1,0 +1,20 @@
+@if (session.currentUser(); as usuario) {
+  <mat-toolbar class="nav-global">
+    <span class="titulo">Chamados de TI</span>
+    <nav class="links">
+      <a routerLink="/chamados/novo" routerLinkActive="link-ativo">Abrir chamado</a>
+      <a routerLink="/chamados/meus" routerLinkActive="link-ativo">Meus chamados</a>
+      @if (session.hasRole('Tecnico') || session.hasRole('Supervisor')) {
+        <a routerLink="/equipe/fila" routerLinkActive="link-ativo">Fila da equipe</a>
+      }
+      <a routerLink="/categorias" routerLinkActive="link-ativo">Categorias</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="usuario">{{ usuario.roles.join(', ') }}</span>
+    <button mat-button class="acao-sair" (click)="sair()">Sair</button>
+  </mat-toolbar>
+}
+
+<main class="conteudo">
+  <router-outlet />
+</main>

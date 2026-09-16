@@ -1,0 +1,22 @@
+.sem-padding {
+  padding: 0;
+  overflow: hidden;
+}
+
+table {
+  width: 100%;
+  background: transparent;
+}
+
+.vazio {
+  padding: var(--spacing-lg);
+  color: var(--color-ink-muted-48);
+  margin: 0;
+}
+
+.linha-clicavel {
+  cursor: pointer;
+}
+.linha-clicavel:hover {
+  background: var(--color-canvas-parchment);
+}

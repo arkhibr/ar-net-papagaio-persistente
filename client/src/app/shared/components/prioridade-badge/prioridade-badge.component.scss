@@ -1,0 +1,13 @@
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.cor-baixa { background: #ececed; color: #5c5c5e; }
+.cor-media { background: #e3f0fc; color: #0058ad; }
+.cor-alta { background: #fdf1e0; color: #b06a00; }
+.cor-critica { background: #fbe4e2; color: #b3261e; }

@@ -69,22 +69,17 @@ internal sealed class ChamadoConfiguration : IEntityTypeConfiguration<Chamado>
         // otimista"; SharedKernel/ConcurrencyException.cs). Nunca exposta como propriedade em
         // Chamados.Domain.Chamado.
         //
-        // Nota de risco não verificado (sem compilador/banco disponível nesta sessão, ver
-        // pacotes.md): IsRowVersion() é a API que o SQL Server mapeia diretamente para uma
-        // coluna nativa `rowversion`/`timestamp`, auto-gerada pelo próprio motor a cada UPDATE.
-        // O provider Sqlite não tem um tipo nativo equivalente; o EF Core moderno (Sqlite
-        // provider) simula IsRowVersion() gerando o valor em memória (um novo valor a cada
-        // SaveChanges, não pelo banco), o que ainda cumpre o contrato de concorrência otimista
-        // (o WHERE da query de UPDATE compara o valor original, ainda detecta conflito), mas o
-        // comportamento exato não foi confirmado por build/teste real nesta sessão. Se
-        // Infrastructure.IntegrationTests (construcao-de-testes) revelar que IsRowVersion()
-        // não gera um novo valor a cada update no provider Sqlite, a alternativa é
-        // IsConcurrencyToken() combinado com um ValueGenerator explícito (ex.: Guid.NewGuid()
-        // a cada update via um SaveChangesInterceptor), mantendo IsRowVersion() como a primeira
-        // tentativa por ser a API mais direta e portável para SQL Server (10-configuracao-e-
-        // segredos.md/plano-de-arquitetura.md secao 8 assumiam SQL Server como alvo final).
+        // IsRowVersion() foi tentado primeiro (API mais direta e portável para SQL Server,
+        // 10-configuracao-e-segredos.md/plano-de-arquitetura.md secao 8 assumiam SQL Server como
+        // alvo final) e descartado: confirmado com projeto isolado reproduzindo o mesmo
+        // provider/versão desta solution que, no Sqlite, IsRowVersion() nunca gera valor nenhum
+        // — a coluna fica NULL para sempre, tanto no INSERT quanto no UPDATE, quebrando a
+        // concorrência otimista para 100% das gravações (WHERE RowVersion = @valor nunca é
+        // verdadeiro contra uma coluna NULL). IsConcurrencyToken() (sem ValueGenerated) + o valor
+        // atribuído por RowVersionInterceptor (Infrastructure/RowVersionInterceptor.cs) a cada
+        // SaveChanges é a alternativa que este mesmo achado já antecipava.
         builder.Property<byte[]>("RowVersion")
-            .IsRowVersion();
+            .IsConcurrencyToken();
 
         builder.HasIndex(c => c.SolicitanteId);
         builder.HasIndex(c => new { c.EquipeId, c.Status });

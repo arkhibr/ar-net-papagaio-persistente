@@ -72,6 +72,7 @@ public static class ChamadosDependencyInjection
         {
             var chamadosOptions = serviceProvider.GetRequiredService<IOptions<ChamadosOptions>>().Value;
             options.UseSqlite(chamadosOptions.ConnectionString);
+            options.AddInterceptors(new RowVersionInterceptor());
         });
 
         services.AddScoped<IChamadoRepository, ChamadoRepository>();

@@ -1,0 +1,44 @@
+<h1>Fila da equipe</h1>
+
+@if (carregando()) {
+  <mat-spinner diameter="32" />
+} @else {
+  <div class="surface-card sem-padding">
+    <table mat-table [dataSource]="itens()">
+      <ng-container matColumnDef="prioridade">
+        <th mat-header-cell *matHeaderCellDef>Prioridade</th>
+        <td mat-cell *matCellDef="let c"><app-prioridade-badge [prioridade]="c.prioridade" /></td>
+      </ng-container>
+      <ng-container matColumnDef="status">
+        <th mat-header-cell *matHeaderCellDef>Status</th>
+        <td mat-cell *matCellDef="let c"><app-status-chamado-badge [status]="c.status" /></td>
+      </ng-container>
+      <ng-container matColumnDef="abertoEm">
+        <th mat-header-cell *matHeaderCellDef>Aberto em</th>
+        <td mat-cell *matCellDef="let c">{{ c.abertoEm | date: 'dd/MM/yyyy HH:mm' }}</td>
+      </ng-container>
+      <ng-container matColumnDef="prazoSla">
+        <th mat-header-cell *matHeaderCellDef>Prazo SLA</th>
+        <td mat-cell *matCellDef="let c">{{ c.prazoSla | date: 'dd/MM/yyyy HH:mm' }}</td>
+      </ng-container>
+      <ng-container matColumnDef="tecnicoAtribuidoId">
+        <th mat-header-cell *matHeaderCellDef>Técnico</th>
+        <td mat-cell *matCellDef="let c">{{ c.tecnicoAtribuidoId ?? '—' }}</td>
+      </ng-container>
+      <tr mat-header-row *matHeaderRowDef="colunas"></tr>
+      <tr mat-row *matRowDef="let row; columns: colunas" (click)="abrirDetalhe(row)" class="linha-clicavel"></tr>
+    </table>
+
+    @if (itens().length === 0) {
+      <p class="vazio">Nenhum chamado na fila.</p>
+    }
+
+    <mat-paginator
+      [length]="totalItems()"
+      [pageSize]="pageSize()"
+      [pageIndex]="page() - 1"
+      [pageSizeOptions]="[10, 20, 50]"
+      (page)="mudarPagina($event)"
+    />
+  </div>
+}
