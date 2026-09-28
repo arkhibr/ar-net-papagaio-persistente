@@ -2,6 +2,7 @@ using Chamados.Application.Commands;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
 using Chamados.Domain;
+using SharedKernel;
 using Xunit;
 
 namespace Chamados.Application.UnitTests.Commands;
@@ -34,7 +35,7 @@ public class AtribuirChamadoCommandHandlerTests
         Assert.Equal(tecnicoId, chamado.TecnicoAtribuidoId);
         // RowVersion do Command (decodificado pelo controller a partir do If-Match) precisa
         // chegar à porta de repositório — é isso que fecha o ciclo real de ETag/If-Match.
-        Assert.Equal([(byte)1], repository.RowVersionEsperadoRecebido[chamado.Id]);
+        Assert.Equal([(byte)1], repository.RowVersionEsperadoRecebido[chamado.Id]!);
     }
 
     [Fact]
@@ -50,5 +51,20 @@ public class AtribuirChamadoCommandHandlerTests
         var resultado = await handler.Handle(command, CancellationToken.None);
 
         Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.BusinessRule, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
+    }
+
+    [Fact]
+    public async Task Chamado_inexistente_deve_devolver_Result_NotFound_sem_salvar()
+    {
+        var repository = new FakeChamadoRepository();
+        var handler = new AtribuirChamadoCommandHandler(repository);
+
+        var resultado = await handler.Handle(new AtribuirChamadoCommand(Guid.NewGuid(), Guid.NewGuid(), RowVersion: [1], IdempotencyKey: "chave-atribuir-3"), CancellationToken.None);
+
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
     }
 }

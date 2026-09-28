@@ -2,23 +2,24 @@ using Catalogo.Application.Queries;
 using Catalogo.Application.UnitTests.Fakes;
 using Catalogo.Contracts;
 using Catalogo.Domain;
+using SharedKernel;
 using Xunit;
 
 namespace Catalogo.Application.UnitTests.Queries;
 
 /// <summary>
-/// CategoriasDeServicoQueryHandler (modo TDD): lista todas as categorias cadastradas.
-/// Autorização "qualquer autenticado" é leitura A (arquitetura/12), resolvida na Api via
-/// [Authorize] genérico — não há checagem de autorização por recurso a testar aqui, só o
-/// comportamento de listagem em si.
+/// CategoriasDeServicoQueryHandler: lista todas as categorias cadastradas, projetadas pelo
+/// repositório. Autorização "qualquer autenticado" é leitura A (arquitetura/12), na Api. A
+/// Query é IGlobalCacheableQuery (arquitetura/24): o dado é o mesmo para qualquer usuário, e a
+/// omissão do escopo de ator no cache é decisão explícita da Query.
 /// </summary>
 public class CategoriasDeServicoQueryHandlerTests
 {
     [Fact]
     public async Task Deve_listar_todas_as_categorias_cadastradas()
     {
-        var categoriaRede = CategoriaDeServico.Criar("Suporte de Rede", Guid.NewGuid());
-        var categoriaHardware = CategoriaDeServico.Criar("Suporte de Hardware", Guid.NewGuid());
+        var categoriaRede = CategoriaDeServico.Criar("Suporte de Rede", Guid.NewGuid(), [(PrioridadeServico.Media, 24)]);
+        var categoriaHardware = CategoriaDeServico.Criar("Suporte de Hardware", Guid.NewGuid(), [(PrioridadeServico.Media, 24)]);
         var repository = new FakeCategoriaDeServicoRepository()
             .ComCategoria(categoriaRede)
             .ComCategoria(categoriaHardware);
@@ -42,5 +43,14 @@ public class CategoriasDeServicoQueryHandlerTests
 
         Assert.True(resultado.IsSuccess);
         Assert.Empty(resultado.Value!);
+    }
+
+    [Fact]
+    public void Query_deve_ser_cacheavel_globalmente_com_chave_fixa()
+    {
+        var query = new CategoriasDeServicoQuery();
+
+        Assert.IsAssignableFrom<IGlobalCacheableQuery>(query);
+        Assert.Equal("categorias-de-servico", query.CacheKey);
     }
 }

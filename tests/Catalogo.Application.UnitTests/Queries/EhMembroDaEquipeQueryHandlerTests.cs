@@ -6,9 +6,9 @@ using Xunit;
 namespace Catalogo.Application.UnitTests.Queries;
 
 /// <summary>
-/// EhMembroDaEquipeQueryHandler (modo TDD): implementação real da Query pública consumida
-/// pela implementação de Chamados.Application.IEquipeMembershipChecker, a partir do guard
-/// explícito de ReclassificarChamadoCommandHandler (plano-de-arquitetura.md secao 2).
+/// EhMembroDaEquipeQueryHandler: implementação real da Query pública consumida pela
+/// implementação de Chamados.Contracts.IChamadosAuthorizationContext (Infrastructure de
+/// Chamados), via ISender (arquitetura/04).
 /// Checagem determinística de vínculo: sempre Result.Success (true ou false).
 /// </summary>
 public class EhMembroDaEquipeQueryHandlerTests

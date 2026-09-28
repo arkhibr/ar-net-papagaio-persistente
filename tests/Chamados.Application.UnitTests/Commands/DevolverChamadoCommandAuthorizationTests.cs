@@ -1,11 +1,13 @@
-using Chamados.Application.Commands;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
 using Xunit;
 
 namespace Chamados.Application.UnitTests.Commands;
 
-/// <summary>DevolverChamadoCommand.IsAuthorizedAsync: só o técnico atualmente atribuído.</summary>
+/// <summary>
+/// DevolverChamadoCommand.IsAuthorizedAsync (arquitetura/12): só o técnico atualmente
+/// atribuído (EhTecnicoAtribuidoAsync). Ser membro da equipe não basta.
+/// </summary>
 public class DevolverChamadoCommandAuthorizationTests
 {
     [Fact]
@@ -13,8 +15,8 @@ public class DevolverChamadoCommandAuthorizationTests
     {
         var chamadoId = Guid.NewGuid();
         var command = new DevolverChamadoCommand(chamadoId, "chave-devolver");
-        var currentUser = new FakeCurrentUser();
-        var context = new FakeAuthorizationContext().ComVinculo(currentUser.UserId, chamadoId);
+        var currentUser = new FakeCurrentUser().ComPapel("Tecnico");
+        var context = new FakeAuthorizationContext().ComTecnicoAtribuido(currentUser.UserId, chamadoId);
 
         var autorizado = await command.IsAuthorizedAsync(currentUser, context, CancellationToken.None);
 
@@ -22,12 +24,12 @@ public class DevolverChamadoCommandAuthorizationTests
     }
 
     [Fact]
-    public async Task Tecnico_diferente_do_atribuido_nao_deve_ser_autorizado()
+    public async Task Membro_da_equipe_que_nao_e_o_tecnico_atribuido_nao_deve_ser_autorizado()
     {
         var chamadoId = Guid.NewGuid();
         var command = new DevolverChamadoCommand(chamadoId, "chave-devolver");
-        var currentUser = new FakeCurrentUser();
-        var context = new FakeAuthorizationContext(); // sem vínculo para este usuário
+        var currentUser = new FakeCurrentUser().ComPapel("Tecnico");
+        var context = new FakeAuthorizationContext().ComMembroDaEquipeResponsavel(currentUser.UserId, chamadoId);
 
         var autorizado = await command.IsAuthorizedAsync(currentUser, context, CancellationToken.None);
 

@@ -1,77 +1,72 @@
 using Mediator;
-using SharedKernel;
 using SharedKernel.Messaging;
 using Xunit;
 
 namespace SharedKernel.UnitTests;
 
 /// <summary>
-/// AuthorizationBehavior (arquitetura/12-autorizacao-por-recurso.md,
-/// arquitetura/03-commands-e-queries.md): usa um ICurrentUser fake (nunca HttpContext real,
-/// 13-estrategia-de-testes.md).
-///
-/// 1. IsAuthorizedAsync == false lança AuthorizationDeniedException e o handler nunca roda.
-/// 2. IsAuthorizedAsync == true chama o handler normalmente.
+/// AuthorizationBehavior (arquitetura/12-autorizacao-por-recurso.md): usa o contexto de
+/// autorização do módulo dono da mensagem, tipado pela interface do módulo.
 /// </summary>
 public class AuthorizationBehaviorTests
 {
-    private sealed record MensagemDeTeste(Guid RecursoId, bool Autorizado)
-        : IRequest<Result<Guid>>, IRequiresAuthorization
+    private interface IContextoDeTeste : IAuthorizationContext
     {
-        public Task<bool> IsAuthorizedAsync(
-            ICurrentUser currentUser, IAuthorizationContext context, CancellationToken cancellationToken) =>
-            Task.FromResult(Autorizado);
+        bool Permite { get; }
     }
 
-    private sealed class FakeCurrentUser : ICurrentUser
+    private sealed class ContextoDeTeste : IContextoDeTeste
     {
-        public Guid UserId { get; init; } = Guid.NewGuid();
-        public Guid SessionId { get; init; } = Guid.NewGuid();
-        public bool IsAuthenticated { get; init; } = true;
-        public bool IsSystemActor { get; init; }
-        public bool IsInRole(string role) => false;
+        public bool Permite { get; init; }
     }
 
-    private sealed class FakeAuthorizationContext : IAuthorizationContext
+    private sealed record Mensagem(bool Ocultar = false) : IRequest<Result<Guid>>, IRequiresAuthorization<IContextoDeTeste>
     {
-        public Task<bool> HasResourceLinkAsync(Guid userId, Guid resourceId, CancellationToken cancellationToken) =>
-            Task.FromResult(false);
+        public bool HideExistenceWhenDenied => Ocultar;
+
+        public Task<bool> IsAuthorizedAsync(ICurrentUser currentUser, IContextoDeTeste context, CancellationToken cancellationToken) =>
+            Task.FromResult(context.Permite);
+    }
+
+    private sealed class OutroContexto : IAuthorizationContext;
+
+    private static AuthorizationBehavior<Mensagem, Result<Guid>> Behavior(IAuthorizationContext contexto) =>
+        new(new FakeCurrentUser(), new FixedModuleService<IAuthorizationContext>(contexto));
+
+    private static readonly MessageHandlerDelegate<Mensagem, Result<Guid>> Sucesso =
+        (_, _) => ValueTask.FromResult(Result<Guid>.Success(Guid.NewGuid()));
+
+    [Fact]
+    public async Task Negado_lanca_AuthorizationDeniedException_sem_chamar_o_handler()
+    {
+        var chamadas = 0;
+
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => Behavior(new ContextoDeTeste { Permite = false })
+            .Handle(new Mensagem(), (_, _) => { chamadas++; return ValueTask.FromResult(Result<Guid>.Success(Guid.NewGuid())); }, CancellationToken.None)
+            .AsTask());
+
+        Assert.Equal(0, chamadas);
     }
 
     [Fact]
-    public async Task Quando_IsAuthorizedAsync_devolve_false_deve_lancar_AuthorizationDeniedException_sem_chamar_o_handler()
+    public async Task Negado_com_HideExistenceWhenDenied_lanca_ResourceNotFoundException()
     {
-        var behavior = new AuthorizationBehavior<MensagemDeTeste, Result<Guid>>(
-            new FakeCurrentUser(), new FakeAuthorizationContext());
-        var mensagem = new MensagemDeTeste(Guid.NewGuid(), Autorizado: false);
-        var chamadasAoHandler = 0;
-
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next = (_, _) =>
-        {
-            chamadasAoHandler++;
-            return ValueTask.FromResult(Result<Guid>.Success(Guid.NewGuid()));
-        };
-
-        await Assert.ThrowsAsync<AuthorizationDeniedException>(
-            () => behavior.Handle(mensagem, next, CancellationToken.None).AsTask());
-
-        Assert.Equal(0, chamadasAoHandler);
+        await Assert.ThrowsAsync<ResourceNotFoundException>(() => Behavior(new ContextoDeTeste { Permite = false })
+            .Handle(new Mensagem(Ocultar: true), Sucesso, CancellationToken.None).AsTask());
     }
 
     [Fact]
-    public async Task Quando_IsAuthorizedAsync_devolve_true_deve_chamar_o_handler_normalmente()
+    public async Task Autorizado_chama_o_handler()
     {
-        var behavior = new AuthorizationBehavior<MensagemDeTeste, Result<Guid>>(
-            new FakeCurrentUser(), new FakeAuthorizationContext());
-        var mensagem = new MensagemDeTeste(Guid.NewGuid(), Autorizado: true);
-        var valorGerado = Guid.NewGuid();
-
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next =
-            (_, _) => ValueTask.FromResult(Result<Guid>.Success(valorGerado));
-
-        var resposta = await behavior.Handle(mensagem, next, CancellationToken.None);
+        var resposta = await Behavior(new ContextoDeTeste { Permite = true }).Handle(new Mensagem(), Sucesso, CancellationToken.None);
 
         Assert.True(resposta.IsSuccess);
-        Assert.Equal(valorGerado, resposta.Value);
+    }
+
+    [Fact]
+    public async Task Contexto_de_outro_modulo_falha_alto_em_vez_de_negar_silenciosamente()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Behavior(new OutroContexto()).Handle(new Mensagem(), Sucesso, CancellationToken.None).AsTask());
     }
 }

@@ -54,4 +54,16 @@ public class ResultSerializationTests
         Assert.NotNull(deserializado);
         Assert.True(deserializado!.IsSuccess);
     }
+
+    [Fact]
+    public void Result_NotFound_deve_sobreviver_ao_round_trip_de_serializacao_com_o_tipo_de_erro()
+    {
+        var original = Result<Guid>.NotFound("Chamado não encontrado.");
+
+        var deserializado = JsonSerializer.Deserialize<Result<Guid>>(JsonSerializer.Serialize(original));
+
+        Assert.NotNull(deserializado);
+        Assert.True(deserializado!.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, deserializado.ErrorKind);
+    }
 }

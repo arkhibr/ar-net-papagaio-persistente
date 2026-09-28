@@ -18,4 +18,13 @@ internal sealed class FakeMembroDeEquipeRepository : IMembroDeEquipeRepository
 
     public Task<Guid?> ResolverEquipeIdAsync(Guid tecnicoId, CancellationToken cancellationToken) =>
         Task.FromResult(_equipePorTecnico.TryGetValue(tecnicoId, out var equipeId) ? equipeId : (Guid?)null);
+
+    public Task VincularAsync(Guid usuarioId, Guid equipeId, CancellationToken cancellationToken)
+    {
+        _equipePorTecnico[usuarioId] = equipeId;
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> DesvincularAsync(Guid usuarioId, Guid equipeId, CancellationToken cancellationToken) =>
+        Task.FromResult(_equipePorTecnico.TryGetValue(usuarioId, out var atual) && atual == equipeId && _equipePorTecnico.Remove(usuarioId));
 }

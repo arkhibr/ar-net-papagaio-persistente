@@ -2,6 +2,7 @@ using Chamados.Application.Commands;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
 using Chamados.Domain;
+using SharedKernel;
 using Xunit;
 
 namespace Chamados.Application.UnitTests.Commands;
@@ -42,5 +43,20 @@ public class ResolverChamadoCommandHandlerTests
         var resultado = await handler.Handle(command, CancellationToken.None);
 
         Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.BusinessRule, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
+    }
+
+    [Fact]
+    public async Task Chamado_inexistente_deve_devolver_Result_NotFound_sem_salvar()
+    {
+        var repository = new FakeChamadoRepository();
+        var handler = new ResolverChamadoCommandHandler(repository, new FixedTimeProvider(Agora));
+
+        var resultado = await handler.Handle(new ResolverChamadoCommand(Guid.NewGuid(), "Nota qualquer.", "chave-resolver-3"), CancellationToken.None);
+
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
     }
 }

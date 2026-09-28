@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Api/Api.csproj" />
+    <Project Path="src/SharedKernel/SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Catalogo/">
+    <Project Path="src/Catalogo/Catalogo.Contracts/Catalogo.Contracts.csproj" />
+    <Project Path="src/Catalogo/Catalogo/Catalogo.csproj" />
+  </Folder>
+  <Folder Name="/src/Chamados/">
+    <Project Path="src/Chamados/Chamados.Contracts/Chamados.Contracts.csproj" />
+    <Project Path="src/Chamados/Chamados/Chamados.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Api.IntegrationTests/Api.IntegrationTests.csproj" />
+    <Project Path="tests/Catalogo.Application.UnitTests/Catalogo.Application.UnitTests.csproj" />
+    <Project Path="tests/Catalogo.Domain.UnitTests/Catalogo.Domain.UnitTests.csproj" />
+    <Project Path="tests/Chamados.Application.UnitTests/Chamados.Application.UnitTests.csproj" />
+    <Project Path="tests/Chamados.Domain.UnitTests/Chamados.Domain.UnitTests.csproj" />
+    <Project Path="tests/SharedKernel.UnitTests/SharedKernel.UnitTests.csproj" />
+  </Folder>
+</Solution>

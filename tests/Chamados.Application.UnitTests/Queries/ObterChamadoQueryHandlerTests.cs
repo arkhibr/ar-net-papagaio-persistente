@@ -1,108 +1,63 @@
 using Chamados.Application.Queries;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
-using Chamados.Domain;
 using SharedKernel;
 using Xunit;
 
 namespace Chamados.Application.UnitTests.Queries;
 
 /// <summary>
-/// ObterChamadoQueryHandler: guard explícito de autorização (ver ObterChamadoQuery) —
-/// solicitante dono, técnico atribuído, ou membro (Tecnico/Supervisor) da equipe responsável,
-/// em qualquer status. Cobre os três caminhos autorizados, o caminho negado
-/// (AuthorizationDeniedException) e "chamado não encontrado" (Result.Failure).
+/// ObterChamadoQueryHandler: a autorização já rodou no pipeline (ObterChamadoQuery
+/// .IsAuthorizedAsync, coberta em ObterChamadoQueryAuthorizationTests; M3 de achados.md), então
+/// o handler só repassa o detalhe versionado da porta de leitura (arquitetura/27). Chamado
+/// inexistente vira Result.NotFound (ErrorKind.NotFound -> 404 sem depender do texto).
 /// </summary>
 public class ObterChamadoQueryHandlerTests
 {
     private static readonly DateTimeOffset AbertoEm = new(2026, 9, 13, 8, 0, 0, TimeSpan.Zero);
 
+    private static ChamadoDetalheVersionado NovoDetalhe(string versao) =>
+        new(
+            new ChamadoDetalheDto(
+                Id: Guid.NewGuid(),
+                SolicitanteId: Guid.NewGuid(),
+                CategoriaId: Guid.NewGuid(),
+                EquipeId: Guid.NewGuid(),
+                Prioridade: PrioridadeChamado.Media,
+                Status: StatusChamado.Aberto,
+                AbertoEm: AbertoEm,
+                PrazoSla: AbertoEm.AddHours(24),
+                TecnicoAtribuidoId: null,
+                NotaResolucao: null,
+                ResolvidoEm: null,
+                FechadoEm: null,
+                Escalonado: false,
+                DataEscalonamento: null),
+            versao);
+
     [Fact]
-    public async Task Solicitante_dono_deve_ver_o_proprio_chamado()
+    public async Task Deve_devolver_o_detalhe_e_a_versao_lidos_da_porta_de_leitura()
     {
-        var solicitanteId = Guid.NewGuid();
-        var chamado = Chamado.Abrir(
-            solicitanteId, Guid.NewGuid(), Guid.NewGuid(), PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        var detalhe = NovoDetalhe(Convert.ToBase64String([9, 9, 9]));
+        var leitura = new FakeChamadoLeitura().ComDetalhe(detalhe);
+        var handler = new ObterChamadoQueryHandler(leitura);
 
-        var repository = new FakeChamadoRepository().ComChamado(chamado).ComRowVersion(chamado.Id, [9, 9, 9]);
-        var equipeMembershipChecker = new FakeEquipeMembershipChecker();
-        var currentUser = new FakeCurrentUser { UserId = solicitanteId };
-        var handler = new ObterChamadoQueryHandler(repository, equipeMembershipChecker, currentUser);
-
-        var resultado = await handler.Handle(new ObterChamadoQuery(chamado.Id), CancellationToken.None);
+        var resultado = await handler.Handle(new ObterChamadoQuery(detalhe.Chamado.Id), CancellationToken.None);
 
         Assert.True(resultado.IsSuccess);
-        Assert.Equal(chamado.Id, resultado.Value!.Id);
-        Assert.Equal(solicitanteId, resultado.Value!.SolicitanteId);
-        // RowVersion vai em base64 no DTO — a Api usa isso pra montar o header ETag sem
-        // reinterpretar o valor (arquitetura/06).
-        Assert.Equal(Convert.ToBase64String([9, 9, 9]), resultado.Value!.RowVersion);
+        Assert.Same(detalhe, resultado.Value);
+        // A versão (base64) segue separada do DTO: a Api a expõe só como ETag (arquitetura/06).
+        Assert.Equal(Convert.ToBase64String([9, 9, 9]), resultado.Value!.Versao);
     }
 
     [Fact]
-    public async Task Tecnico_atribuido_deve_ver_o_chamado()
+    public async Task Chamado_inexistente_deve_devolver_Result_NotFound()
     {
-        var tecnicoId = Guid.NewGuid();
-        var equipeId = Guid.NewGuid();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), Guid.NewGuid(), equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
-        chamado.Atribuir(tecnicoId);
-
-        var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var equipeMembershipChecker = new FakeEquipeMembershipChecker();
-        var currentUser = new FakeCurrentUser { UserId = tecnicoId }.ComPapel("Tecnico");
-        var handler = new ObterChamadoQueryHandler(repository, equipeMembershipChecker, currentUser);
-
-        var resultado = await handler.Handle(new ObterChamadoQuery(chamado.Id), CancellationToken.None);
-
-        Assert.True(resultado.IsSuccess);
-        Assert.Equal(tecnicoId, resultado.Value!.TecnicoAtribuidoId);
-    }
-
-    [Fact]
-    public async Task Membro_da_equipe_responsavel_deve_ver_o_chamado_mesmo_sem_estar_atribuido()
-    {
-        var equipeId = Guid.NewGuid();
-        var membroId = Guid.NewGuid();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), Guid.NewGuid(), equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
-        chamado.Atribuir(Guid.NewGuid()); // atribuído a outro técnico, ainda EmAtendimento
-
-        var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var equipeMembershipChecker = new FakeEquipeMembershipChecker().ComMembro(membroId, equipeId);
-        var currentUser = new FakeCurrentUser { UserId = membroId }.ComPapel("Supervisor");
-        var handler = new ObterChamadoQueryHandler(repository, equipeMembershipChecker, currentUser);
-
-        var resultado = await handler.Handle(new ObterChamadoQuery(chamado.Id), CancellationToken.None);
-
-        Assert.True(resultado.IsSuccess);
-    }
-
-    [Fact]
-    public async Task Usuario_sem_nenhum_vinculo_deve_lancar_AuthorizationDeniedException()
-    {
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
-
-        var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var equipeMembershipChecker = new FakeEquipeMembershipChecker();
-        var currentUser = new FakeCurrentUser(); // sem vínculo, sem papel
-        var handler = new ObterChamadoQueryHandler(repository, equipeMembershipChecker, currentUser);
-
-        await Assert.ThrowsAsync<AuthorizationDeniedException>(
-            () => handler.Handle(new ObterChamadoQuery(chamado.Id), CancellationToken.None).AsTask());
-    }
-
-    [Fact]
-    public async Task Chamado_inexistente_deve_devolver_Result_Failure()
-    {
-        var repository = new FakeChamadoRepository();
-        var equipeMembershipChecker = new FakeEquipeMembershipChecker();
-        var currentUser = new FakeCurrentUser();
-        var handler = new ObterChamadoQueryHandler(repository, equipeMembershipChecker, currentUser);
+        var handler = new ObterChamadoQueryHandler(new FakeChamadoLeitura());
 
         var resultado = await handler.Handle(new ObterChamadoQuery(Guid.NewGuid()), CancellationToken.None);
 
         Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, resultado.ErrorKind);
     }
 }

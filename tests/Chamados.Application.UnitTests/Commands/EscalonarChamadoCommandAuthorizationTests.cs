@@ -1,4 +1,3 @@
-using Chamados.Application.Commands;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
 using Xunit;
@@ -6,9 +5,8 @@ using Xunit;
 namespace Chamados.Application.UnitTests.Commands;
 
 /// <summary>
-/// EscalonarChamadoCommand.IsAuthorizedAsync: só ator de sistema (job de SLA no Worker,
-/// nunca exposto via API pública). Nenhum usuário humano, mesmo com papel de
-/// Técnico/Supervisor, deve ser autorizado.
+/// EscalonarChamadoCommand.IsAuthorizedAsync: só ator de sistema (job de SLA no Worker, sem
+/// rota HTTP). Nenhum usuário humano, mesmo Supervisor ou técnico atribuído, é autorizado.
 /// </summary>
 public class EscalonarChamadoCommandAuthorizationTests
 {
@@ -25,11 +23,14 @@ public class EscalonarChamadoCommandAuthorizationTests
     }
 
     [Fact]
-    public async Task Usuario_humano_mesmo_com_papel_Supervisor_nao_deve_ser_autorizado()
+    public async Task Usuario_humano_mesmo_com_papel_Supervisor_e_vinculo_nao_deve_ser_autorizado()
     {
-        var command = new EscalonarChamadoCommand(Guid.NewGuid(), "chave-escalonar-ciclo-1");
+        var chamadoId = Guid.NewGuid();
+        var command = new EscalonarChamadoCommand(chamadoId, "chave-escalonar-ciclo-1");
         var currentUser = new FakeCurrentUser().ComPapel("Supervisor");
-        var context = new FakeAuthorizationContext();
+        var context = new FakeAuthorizationContext()
+            .ComTecnicoAtribuido(currentUser.UserId, chamadoId)
+            .ComMembroDaEquipeResponsavel(currentUser.UserId, chamadoId);
 
         var autorizado = await command.IsAuthorizedAsync(currentUser, context, CancellationToken.None);
 

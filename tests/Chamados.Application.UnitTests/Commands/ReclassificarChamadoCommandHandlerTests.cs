@@ -9,113 +9,93 @@ using Xunit;
 namespace Chamados.Application.UnitTests.Commands;
 
 /// <summary>
-/// ReclassificarChamadoCommandHandler (modo TDD) — guard explícito no handler, NÃO
-/// IRequiresAuthorization padrão (lacuna 1 do plano-de-arquitetura.md, secao 2/5): a
-/// autorização depende do ESTADO do agregado (técnico atribuído, ou qualquer técnico da
-/// equipe responsável se o chamado ainda está Aberto). Por isso os casos de autorização são
-/// testados aqui, através do handler completo (com o Chamado carregado), e não como um
-/// IsAuthorizedAsync isolado — esse Command nem implementa a interface.
-///
-/// Autorizado:
-///   - o próprio técnico atribuído, em qualquer estado válido (Aberto ou EmAtendimento);
-///   - qualquer técnico da equipe responsável, SE o chamado ainda está Aberto (sem técnico
-///     atribuído ainda, ou o vínculo não importa nesse estado).
-/// Negado:
-///   - técnico que não é o atribuído E o chamado já está EmAtendimento;
-///   - usuário que não é sequer membro da equipe responsável, em qualquer estado.
+/// ReclassificarChamadoCommandHandler: reclassifica a prioridade e recalcula o prazo a partir
+/// da abertura com o SLA resolvido pelo Catálogo (ResolverEquipeESlaQuery, arquitetura/29).
+/// A autorização (técnico atribuído ou chamado na fila da equipe do usuário) saiu do handler e
+/// roda no pipeline (M4 de achados.md): coberta em ReclassificarChamadoCommandAuthorizationTests.
 /// </summary>
 public class ReclassificarChamadoCommandHandlerTests
 {
     private static readonly DateTimeOffset AbertoEm = new(2026, 9, 13, 8, 0, 0, TimeSpan.Zero);
 
-    private static (Guid CategoriaId, Guid EquipeId) NovaCategoriaEEquipe() => (Guid.NewGuid(), Guid.NewGuid());
-
     [Fact]
-    public async Task Tecnico_atribuido_deve_poder_reclassificar_um_chamado_EmAtendimento()
+    public async Task Reclassificar_deve_aplicar_o_SLA_da_nova_prioridade_a_partir_da_abertura()
     {
-        var (categoriaId, equipeId) = NovaCategoriaEEquipe();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
-        var tecnicoId = Guid.NewGuid();
-        chamado.Atribuir(tecnicoId);
+        var categoriaId = Guid.NewGuid();
+        var equipeId = Guid.NewGuid();
+        var chamado = Chamado.Abrir(Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        chamado.Atribuir(Guid.NewGuid());
 
         var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var membershipChecker = new FakeEquipeMembershipChecker();
-        var currentUser = new FakeCurrentUser { UserId = tecnicoId };
         var sender = new FakeSender().ComResposta(categoriaId, PrioridadeServico.Critica, equipeId, horasDeSla: 4);
-        var handler = new ReclassificarChamadoCommandHandler(repository, membershipChecker, currentUser, sender);
+        var handler = new ReclassificarChamadoCommandHandler(repository, sender);
 
-        var command = new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Critica, "chave-reclassificar-1");
-
-        var resultado = await handler.Handle(command, CancellationToken.None);
+        var resultado = await handler.Handle(
+            new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Critica, "chave-reclassificar-1"),
+            CancellationToken.None);
 
         Assert.True(resultado.IsSuccess);
         Assert.Equal(PrioridadeChamado.Critica, chamado.Prioridade);
         Assert.Equal(AbertoEm.AddHours(4), chamado.PrazoSla);
+        Assert.Equal(1, repository.Salvamentos);
     }
 
     [Fact]
-    public async Task Tecnico_da_equipe_nao_atribuido_deve_poder_reclassificar_enquanto_Aberto()
+    public async Task Catalogo_sem_SLA_para_a_nova_prioridade_deve_devolver_Result_Failure_sem_alterar_o_chamado()
     {
-        var (categoriaId, equipeId) = NovaCategoriaEEquipe();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        var categoriaId = Guid.NewGuid();
+        var chamado = Chamado.Abrir(Guid.NewGuid(), categoriaId, Guid.NewGuid(), PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        var prazoOriginal = chamado.PrazoSla;
 
         var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var tecnicoDaEquipe = Guid.NewGuid();
-        var membershipChecker = new FakeEquipeMembershipChecker().ComMembro(tecnicoDaEquipe, equipeId);
-        var currentUser = new FakeCurrentUser { UserId = tecnicoDaEquipe };
-        var sender = new FakeSender().ComResposta(categoriaId, PrioridadeServico.Alta, equipeId, horasDeSla: 8);
-        var handler = new ReclassificarChamadoCommandHandler(repository, membershipChecker, currentUser, sender);
+        var sender = new FakeSender(); // Catálogo não resolve nada -> Failure
+        var handler = new ReclassificarChamadoCommandHandler(repository, sender);
 
-        var command = new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Alta, "chave-reclassificar-2");
+        var resultado = await handler.Handle(
+            new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Alta, "chave-reclassificar-2"),
+            CancellationToken.None);
 
-        var resultado = await handler.Handle(command, CancellationToken.None);
-
-        Assert.True(resultado.IsSuccess);
-        Assert.Equal(PrioridadeChamado.Alta, chamado.Prioridade);
-    }
-
-    [Fact]
-    public async Task Tecnico_da_equipe_nao_atribuido_nao_deve_poder_reclassificar_um_chamado_ja_EmAtendimento_por_outro_tecnico()
-    {
-        var (categoriaId, equipeId) = NovaCategoriaEEquipe();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
-        chamado.Atribuir(Guid.NewGuid()); // outro técnico assume o chamado
-
-        var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var tecnicoDaEquipe = Guid.NewGuid();
-        var membershipChecker = new FakeEquipeMembershipChecker().ComMembro(tecnicoDaEquipe, equipeId);
-        var currentUser = new FakeCurrentUser { UserId = tecnicoDaEquipe };
-        var sender = new FakeSender().ComResposta(categoriaId, PrioridadeServico.Alta, equipeId, horasDeSla: 8);
-        var handler = new ReclassificarChamadoCommandHandler(repository, membershipChecker, currentUser, sender);
-
-        var command = new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Alta, "chave-reclassificar-3");
-
-        await Assert.ThrowsAsync<AuthorizationDeniedException>(
-            () => handler.Handle(command, CancellationToken.None).AsTask());
-
-        // Estado do agregado não deve ter sido alterado por uma tentativa não autorizada.
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.BusinessRule, resultado.ErrorKind);
         Assert.Equal(PrioridadeChamado.Media, chamado.Prioridade);
+        Assert.Equal(prazoOriginal, chamado.PrazoSla);
+        Assert.Equal(0, repository.Salvamentos);
     }
 
     [Fact]
-    public async Task Usuario_que_nao_e_membro_da_equipe_responsavel_nunca_deve_poder_reclassificar()
+    public async Task Reclassificar_um_chamado_Resolvido_deve_devolver_Result_Failure_sem_deixar_a_DomainException_escapar()
     {
-        var (categoriaId, equipeId) = NovaCategoriaEEquipe();
-        var chamado = Chamado.Abrir(
-            Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        var categoriaId = Guid.NewGuid();
+        var equipeId = Guid.NewGuid();
+        var chamado = Chamado.Abrir(Guid.NewGuid(), categoriaId, equipeId, PrioridadeChamado.Media, horasDeSla: 24, AbertoEm);
+        chamado.Atribuir(Guid.NewGuid());
+        chamado.Resolver("Resolvido.", AbertoEm.AddHours(1));
 
         var repository = new FakeChamadoRepository().ComChamado(chamado);
-        var membershipChecker = new FakeEquipeMembershipChecker(); // ninguém é membro
-        var currentUser = new FakeCurrentUser();
         var sender = new FakeSender().ComResposta(categoriaId, PrioridadeServico.Alta, equipeId, horasDeSla: 8);
-        var handler = new ReclassificarChamadoCommandHandler(repository, membershipChecker, currentUser, sender);
+        var handler = new ReclassificarChamadoCommandHandler(repository, sender);
 
-        var command = new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Alta, "chave-reclassificar-4");
+        var resultado = await handler.Handle(
+            new ReclassificarChamadoCommand(chamado.Id, PrioridadeChamado.Alta, "chave-reclassificar-3"),
+            CancellationToken.None);
 
-        await Assert.ThrowsAsync<AuthorizationDeniedException>(
-            () => handler.Handle(command, CancellationToken.None).AsTask());
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.BusinessRule, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
+    }
+
+    [Fact]
+    public async Task Chamado_inexistente_deve_devolver_Result_NotFound_sem_salvar()
+    {
+        var repository = new FakeChamadoRepository();
+        var handler = new ReclassificarChamadoCommandHandler(repository, new FakeSender());
+
+        var resultado = await handler.Handle(
+            new ReclassificarChamadoCommand(Guid.NewGuid(), PrioridadeChamado.Alta, "chave-reclassificar-4"),
+            CancellationToken.None);
+
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
     }
 }

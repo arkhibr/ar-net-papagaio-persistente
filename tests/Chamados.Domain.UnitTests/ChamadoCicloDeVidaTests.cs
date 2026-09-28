@@ -101,6 +101,18 @@ public class ChamadoCicloDeVidaTests
     }
 
     [Fact]
+    public void Devolver_deve_desfazer_o_vinculo_com_o_tecnico_atribuido()
+    {
+        // A2 de achados.md: o técnico que devolveu deixa de ser o atribuído, para não continuar
+        // autorizado a resolver/devolver um chamado que voltou para a fila.
+        var chamado = ChamadoEmAtendimento(out _);
+
+        chamado.Devolver();
+
+        Assert.Null(chamado.TecnicoAtribuidoId);
+    }
+
+    [Fact]
     public void Devolver_a_partir_de_Aberto_deve_lancar_DomainException()
     {
         var chamado = NovoChamado();
@@ -230,6 +242,19 @@ public class ChamadoCicloDeVidaTests
         chamado.Reabrir(fechadoEm.AddDays(5));
 
         Assert.Equal(StatusChamado.Aberto, chamado.Status);
+    }
+
+    [Fact]
+    public void Reabrir_deve_devolver_o_chamado_para_a_fila_sem_tecnico_atribuido()
+    {
+        // A2 de achados.md: o chamado reaberto volta para a fila da equipe.
+        var fechadoEm = AbertoEm.AddHours(2);
+        var chamado = ChamadoFechado(AbertoEm.AddHours(1), fechadoEm);
+        Assert.NotNull(chamado.TecnicoAtribuidoId);
+
+        chamado.Reabrir(fechadoEm.AddDays(1));
+
+        Assert.Null(chamado.TecnicoAtribuidoId);
     }
 
     [Fact]

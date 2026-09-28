@@ -67,7 +67,7 @@ public class AbrirChamadoCommandHandlerTests
 
         var repository = new FakeChamadoRepository();
         var sender = new FakeSender().ComResposta(categoriaId, PrioridadeServico.Critica, equipeId, horasDeSla: 4);
-        var timeProvider = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var timeProvider = new FixedTimeProvider(new DateTimeOffset(2026, 9, 13, 10, 0, 0, TimeSpan.Zero));
         var handler = new AbrirChamadoCommandHandler(repository, sender, timeProvider);
 
         var command = new AbrirChamadoCommand(solicitanteId, categoriaId, PrioridadeChamado.Critica, "chave-abrir-3");
@@ -84,7 +84,7 @@ public class AbrirChamadoCommandHandlerTests
     {
         var repository = new FakeChamadoRepository();
         var sender = new FakeSender(); // nenhuma resposta configurada -> Catalogo não encontra a categoria
-        var timeProvider = new FixedTimeProvider(DateTimeOffset.UtcNow);
+        var timeProvider = new FixedTimeProvider(new DateTimeOffset(2026, 9, 13, 10, 0, 0, TimeSpan.Zero));
         var handler = new AbrirChamadoCommandHandler(repository, sender, timeProvider);
 
         var command = new AbrirChamadoCommand(Guid.NewGuid(), Guid.NewGuid(), PrioridadeChamado.Media, "chave-abrir-2");

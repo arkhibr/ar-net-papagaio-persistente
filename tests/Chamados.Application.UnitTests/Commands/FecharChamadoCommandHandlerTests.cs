@@ -2,6 +2,7 @@ using Chamados.Application.Commands;
 using Chamados.Application.UnitTests.Fakes;
 using Chamados.Contracts;
 using Chamados.Domain;
+using SharedKernel;
 using Xunit;
 
 namespace Chamados.Application.UnitTests.Commands;
@@ -29,7 +30,7 @@ public class FecharChamadoCommandHandlerTests
         var repository = new FakeChamadoRepository().ComChamado(chamado);
         var handler = new FecharChamadoCommandHandler(repository, new FixedTimeProvider(Agora));
 
-        var command = new FecharChamadoCommand(chamado.Id, solicitanteId, "chave-fechar-1");
+        var command = new FecharChamadoCommand(chamado.Id, "chave-fechar-1");
 
         var resultado = await handler.Handle(command, CancellationToken.None);
 
@@ -46,10 +47,25 @@ public class FecharChamadoCommandHandlerTests
         var repository = new FakeChamadoRepository().ComChamado(chamado);
         var handler = new FecharChamadoCommandHandler(repository, new FixedTimeProvider(Agora));
 
-        var command = new FecharChamadoCommand(chamado.Id, solicitanteId, "chave-fechar-2");
+        var command = new FecharChamadoCommand(chamado.Id, "chave-fechar-2");
 
         var resultado = await handler.Handle(command, CancellationToken.None);
 
         Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.BusinessRule, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
+    }
+
+    [Fact]
+    public async Task Chamado_inexistente_deve_devolver_Result_NotFound_sem_salvar()
+    {
+        var repository = new FakeChamadoRepository();
+        var handler = new FecharChamadoCommandHandler(repository, new FixedTimeProvider(Agora));
+
+        var resultado = await handler.Handle(new FecharChamadoCommand(Guid.NewGuid(), "chave-fechar-3"), CancellationToken.None);
+
+        Assert.True(resultado.IsFailure);
+        Assert.Equal(ErrorKind.NotFound, resultado.ErrorKind);
+        Assert.Equal(0, repository.Salvamentos);
     }
 }

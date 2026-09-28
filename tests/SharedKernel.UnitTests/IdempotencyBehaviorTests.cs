@@ -1,153 +1,278 @@
 using Mediator;
-using SharedKernel;
+using Microsoft.Extensions.Options;
 using SharedKernel.Messaging;
 using Xunit;
 
 namespace SharedKernel.UnitTests;
 
 /// <summary>
-/// IdempotencyBehavior (13-estrategia-de-testes.md, arquitetura/06, arquitetura/25):
-///
-/// 1. Segunda chamada com a mesma Idempotency-Key, após sucesso, não deve executar o
-///    handler de negócio de novo (devolve a resposta cacheada).
-/// 2. Uma exceção transitória vinda do handler (representando o que o IUnitOfWork faria
-///    ao capturar DbUpdateConcurrencyException e relançar como ConcurrencyException)
-///    PROPAGA através do behavior sem que a operação seja marcada como concluída — porque
-///    se fosse capturada e virasse Result.Failure, o behavior devolveria essa falha para
-///    sempre sob aquela chave, mesmo que uma nova tentativa pudesse ter sucesso.
+/// IdempotencyBehavior + UnitOfWorkBehavior encadeados como no pipeline real
+/// (arquitetura/06, arquitetura/25; C1 e C2 de achados.md). Um "banco" fake separa o que foi só
+/// encenado do que foi gravado, e registra em qual commit cada coisa entrou.
 /// </summary>
 public class IdempotencyBehaviorTests
 {
-    private sealed record MensagemDeTeste(string IdempotencyKey) : IRequest<Result<Guid>>, IIdempotentCommand;
+    private sealed record Mensagem(string IdempotencyKey, int Valor)
+        : IRequest<Result<Guid>>, IIdempotentCommand, ITransactionalCommand;
 
-    /// <summary>Store fake em memória; simula reserva/conclusão exatamente como o contrato exige.</summary>
-    private sealed class FakeIdempotencyStore : IIdempotencyStore
+    private sealed class FakeBanco
     {
-        private readonly Dictionary<string, IdempotencyRecord> _registros = new();
+        public List<string> NegocioPendente { get; } = [];
+        public List<string> NegocioGravado { get; } = [];
+        public Dictionary<string, IdempotencyRecord> Registros { get; } = new();
+        public Dictionary<string, string> ConclusoesPendentes { get; } = new();
+        public List<(int Negocio, int Conclusoes)> Commits { get; } = [];
+    }
 
-        public Task<IdempotencyRecord?> FindAsync(string idempotencyKey, CancellationToken cancellationToken) =>
-            Task.FromResult(_registros.GetValueOrDefault(idempotencyKey));
+    private sealed class FakeStore : IIdempotencyStore
+    {
+        private readonly FakeBanco _banco;
+        private readonly TimeProvider _tempo;
 
-        public Task ReserveAsync(string idempotencyKey, CancellationToken cancellationToken)
+        public FakeStore(FakeBanco banco, TimeProvider tempo)
         {
-            _registros[idempotencyKey] = new IdempotencyRecord(idempotencyKey, IsCompleted: false, SerializedResponse: null);
+            _banco = banco;
+            _tempo = tempo;
+        }
+
+        private static string K(IdempotencyRequest r) => $"{r.Scope}|{r.Key}";
+
+        public Task<IdempotencyRecord?> FindAsync(IdempotencyRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(_banco.Registros.GetValueOrDefault(K(request)));
+
+        public Task ReserveAsync(IdempotencyRequest request, CancellationToken cancellationToken)
+        {
+            if (!_banco.Registros.TryAdd(K(request), new IdempotencyRecord(false, request.PayloadHash, null, _tempo.GetUtcNow())))
+            {
+                throw new OperationInProgressException("corrida");
+            }
+
             return Task.CompletedTask;
         }
 
-        public Task CompleteAsync(string idempotencyKey, string serializedResponse, CancellationToken cancellationToken)
+        public Task<bool> TryRenewReservationAsync(
+            IdempotencyRequest request, DateTimeOffset previousReservedAt, CancellationToken cancellationToken)
         {
-            _registros[idempotencyKey] = new IdempotencyRecord(idempotencyKey, IsCompleted: true, serializedResponse);
+            var atual = _banco.Registros[K(request)];
+            if (atual.IsCompleted || atual.ReservedAt != previousReservedAt)
+            {
+                return Task.FromResult(false);
+            }
+
+            _banco.Registros[K(request)] = atual with { ReservedAt = _tempo.GetUtcNow() };
+            return Task.FromResult(true);
+        }
+
+        public Task StageCompletionAsync(IdempotencyRequest request, string serializedResponse, CancellationToken cancellationToken)
+        {
+            _banco.ConclusoesPendentes[K(request)] = serializedResponse;
             return Task.CompletedTask;
         }
 
-        public Task ReleaseAsync(string idempotencyKey, CancellationToken cancellationToken)
+        public Task CompleteAsync(IdempotencyRequest request, string serializedResponse, CancellationToken cancellationToken)
         {
-            _registros.Remove(idempotencyKey);
+            _banco.Registros[K(request)] = _banco.Registros[K(request)] with { IsCompleted = true, SerializedResponse = serializedResponse };
+            return Task.CompletedTask;
+        }
+
+        public Task ReleaseAsync(IdempotencyRequest request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _banco.NegocioPendente.Clear();
+            _banco.ConclusoesPendentes.Clear();
+            _banco.Registros.Remove(K(request));
             return Task.CompletedTask;
         }
     }
 
-    [Fact]
-    public async Task Segunda_chamada_com_a_mesma_chave_apos_sucesso_nao_deve_executar_o_handler_de_novo()
+    private sealed class FakeUnitOfWork : IUnitOfWork
     {
-        var store = new FakeIdempotencyStore();
-        var behavior = new IdempotencyBehavior<MensagemDeTeste, Result<Guid>>(store);
-        var mensagem = new MensagemDeTeste("chave-1");
-        var chamadasAoHandler = 0;
-        var valorGerado = Guid.NewGuid();
+        private readonly FakeBanco _banco;
 
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next = (_, _) =>
+        public FakeUnitOfWork(FakeBanco banco)
         {
-            chamadasAoHandler++;
-            return ValueTask.FromResult(Result<Guid>.Success(valorGerado));
-        };
+            _banco = banco;
+        }
 
-        var primeiraResposta = await behavior.Handle(mensagem, next, CancellationToken.None);
-        var segundaResposta = await behavior.Handle(mensagem, next, CancellationToken.None);
+        public Exception? FalhaNoCommit { get; set; }
 
-        Assert.Equal(1, chamadasAoHandler);
-        Assert.True(primeiraResposta.IsSuccess);
-        Assert.True(segundaResposta.IsSuccess);
-        Assert.Equal(valorGerado, primeiraResposta.Value);
-        Assert.Equal(valorGerado, segundaResposta.Value);
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken)
+        {
+            if (FalhaNoCommit is not null)
+            {
+                throw FalhaNoCommit;
+            }
+
+            _banco.Commits.Add((_banco.NegocioPendente.Count, _banco.ConclusoesPendentes.Count));
+            _banco.NegocioGravado.AddRange(_banco.NegocioPendente);
+            _banco.NegocioPendente.Clear();
+            foreach (var (chave, resposta) in _banco.ConclusoesPendentes)
+            {
+                _banco.Registros[chave] = _banco.Registros[chave] with { IsCompleted = true, SerializedResponse = resposta };
+            }
+
+            _banco.ConclusoesPendentes.Clear();
+            return Task.FromResult(1);
+        }
+
+        public void DiscardChanges()
+        {
+            _banco.NegocioPendente.Clear();
+            _banco.ConclusoesPendentes.Clear();
+        }
+    }
+
+    private sealed class Pipeline
+    {
+        public FakeBanco Banco { get; } = new();
+        public FixedTimeProvider Tempo { get; } = new();
+        public FakeUnitOfWork UnitOfWork { get; }
+        public int ChamadasAoHandler { get; private set; }
+        public Func<Mensagem, Result<Guid>> Handler { get; set; } = _ => Result<Guid>.Success(Guid.NewGuid());
+
+        private readonly FakeStore _store;
+
+        public Pipeline()
+        {
+            _store = new FakeStore(Banco, Tempo);
+            UnitOfWork = new FakeUnitOfWork(Banco);
+        }
+
+        public async Task<Result<Guid>> EnviarAsync(Mensagem mensagem, ICurrentUser ator, CancellationToken cancellationToken = default)
+        {
+            var pending = new PendingIdempotency();
+            var idempotencia = new IdempotencyBehavior<Mensagem, Result<Guid>>(
+                new FixedModuleService<IIdempotencyStore>(_store), ator, pending, Tempo, Options.Create(new IdempotencyOptions()));
+            var unitOfWork = new UnitOfWorkBehavior<Mensagem, Result<Guid>>(
+                new FixedModuleService<IUnitOfWork>(UnitOfWork), pending);
+
+            return await idempotencia.Handle(
+                mensagem,
+                (m, ct) => unitOfWork.Handle(m, (m2, _) =>
+                {
+                    ChamadasAoHandler++;
+                    Banco.NegocioPendente.Add($"efeito-{m2.Valor}");
+                    return ValueTask.FromResult(Handler(m2));
+                }, ct),
+                cancellationToken);
+        }
     }
 
     [Fact]
-    public async Task Segunda_chamada_com_a_mesma_chave_apos_falha_de_negocio_determinística_nao_deve_executar_o_handler_de_novo()
+    public async Task Sucesso_grava_a_conclusao_da_chave_no_mesmo_commit_da_mudanca_de_negocio()
     {
-        var store = new FakeIdempotencyStore();
-        var behavior = new IdempotencyBehavior<MensagemDeTeste, Result<Guid>>(store);
-        var mensagem = new MensagemDeTeste("chave-2");
-        var chamadasAoHandler = 0;
+        var pipeline = new Pipeline();
 
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next = (_, _) =>
-        {
-            chamadasAoHandler++;
-            return ValueTask.FromResult(Result<Guid>.Failure("Regra de negócio violada."));
-        };
+        await pipeline.EnviarAsync(new Mensagem("k", 1), new FakeCurrentUser());
 
-        var primeiraResposta = await behavior.Handle(mensagem, next, CancellationToken.None);
-        var segundaResposta = await behavior.Handle(mensagem, next, CancellationToken.None);
-
-        Assert.Equal(1, chamadasAoHandler);
-        Assert.True(primeiraResposta.IsFailure);
-        Assert.True(segundaResposta.IsFailure);
-        Assert.Equal("Regra de negócio violada.", segundaResposta.Error);
+        Assert.Equal([(1, 1)], pipeline.Banco.Commits);
+        Assert.Single(pipeline.Banco.NegocioGravado);
+        Assert.True(pipeline.Banco.Registros.Values.Single().IsCompleted);
     }
 
     [Fact]
-    public async Task Excecao_transitoria_do_handler_deve_propagar_sem_marcar_a_operacao_como_concluida()
+    public async Task Reenvio_apos_sucesso_devolve_a_resposta_gravada_sem_chamar_o_handler()
     {
-        var store = new FakeIdempotencyStore();
-        var behavior = new IdempotencyBehavior<MensagemDeTeste, Result<Guid>>(store);
-        var mensagem = new MensagemDeTeste("chave-3");
-        var chamadasAoHandler = 0;
+        var pipeline = new Pipeline();
+        var ator = new FakeCurrentUser();
 
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next = (_, _) =>
-        {
-            chamadasAoHandler++;
-            // Representa o que aconteceria se IUnitOfWork.SaveChangesAsync capturasse
-            // DbUpdateConcurrencyException e relançasse como ConcurrencyException: falha
-            // transitória de infraestrutura, nunca convertida para Result.Failure.
-            throw new ConcurrencyException("O recurso foi alterado por outra operação.");
-        };
+        var primeira = await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
+        var segunda = await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
 
-        await Assert.ThrowsAsync<ConcurrencyException>(() => behavior.Handle(mensagem, next, CancellationToken.None).AsTask());
-
-        Assert.Equal(1, chamadasAoHandler);
-
-        // A reserva foi liberada (não fica travada como "em andamento" para sempre) — uma nova
-        // tentativa com a mesma chave deve poder chamar o handler de novo, não deve ser
-        // bloqueada nem devolver uma falha cacheada permanentemente.
-        var registro = await store.FindAsync("chave-3", CancellationToken.None);
-        Assert.Null(registro);
-
-        // Nova tentativa deve poder chamar o handler de novo (por exemplo, com sucesso desta vez).
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> nextComSucesso = (_, _) =>
-        {
-            chamadasAoHandler++;
-            return ValueTask.FromResult(Result<Guid>.Success(Guid.NewGuid()));
-        };
-
-        var novaResposta = await behavior.Handle(mensagem, nextComSucesso, CancellationToken.None);
-
-        Assert.Equal(2, chamadasAoHandler);
-        Assert.True(novaResposta.IsSuccess);
+        Assert.Equal(1, pipeline.ChamadasAoHandler);
+        Assert.Equal(primeira.Value, segunda.Value);
     }
 
     [Fact]
-    public async Task Segunda_chamada_concorrente_enquanto_a_primeira_ainda_esta_em_andamento_deve_lancar_OperationInProgressException()
+    public async Task Result_Failure_descarta_o_que_o_handler_encenou_e_grava_so_a_falha_na_chave()
     {
-        var store = new FakeIdempotencyStore();
-        await store.ReserveAsync("chave-4", CancellationToken.None); // simula reserva feita por uma requisição concorrente ainda em voo
+        var pipeline = new Pipeline { Handler = _ => Result<Guid>.Failure("Regra violada.") };
+        var ator = new FakeCurrentUser();
 
-        var behavior = new IdempotencyBehavior<MensagemDeTeste, Result<Guid>>(store);
-        var mensagem = new MensagemDeTeste("chave-4");
+        var primeira = await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
+        var segunda = await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
 
-        MessageHandlerDelegate<MensagemDeTeste, Result<Guid>> next =
-            (_, _) => ValueTask.FromResult(Result<Guid>.Success(Guid.NewGuid()));
+        Assert.True(primeira.IsFailure);
+        Assert.Equal("Regra violada.", segunda.Error);
+        Assert.Equal(1, pipeline.ChamadasAoHandler);
+        Assert.Empty(pipeline.Banco.NegocioGravado);
+        Assert.Equal([(0, 1)], pipeline.Banco.Commits);
+    }
 
-        await Assert.ThrowsAsync<OperationInProgressException>(
-            () => behavior.Handle(mensagem, next, CancellationToken.None).AsTask());
+    [Fact]
+    public async Task Excecao_no_commit_nao_grava_nada_libera_a_chave_e_permite_nova_tentativa()
+    {
+        var pipeline = new Pipeline();
+        var ator = new FakeCurrentUser();
+        pipeline.UnitOfWork.FalhaNoCommit = new ConcurrencyException("conflito");
+
+        await Assert.ThrowsAsync<ConcurrencyException>(() => pipeline.EnviarAsync(new Mensagem("k", 1), ator));
+
+        Assert.Empty(pipeline.Banco.NegocioGravado);
+        Assert.Empty(pipeline.Banco.Registros);
+
+        pipeline.UnitOfWork.FalhaNoCommit = null;
+        var nova = await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
+
+        Assert.True(nova.IsSuccess);
+        Assert.Equal(2, pipeline.ChamadasAoHandler);
+    }
+
+    [Fact]
+    public async Task Cancelamento_do_cliente_ainda_libera_a_reserva()
+    {
+        var pipeline = new Pipeline { Handler = _ => throw new OperationCanceledException() };
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => pipeline.EnviarAsync(new Mensagem("k", 1), new FakeCurrentUser(), cts.Token));
+
+        Assert.Empty(pipeline.Banco.Registros);
+    }
+
+    [Fact]
+    public async Task Mesma_chave_de_outro_usuario_e_outra_requisicao()
+    {
+        var pipeline = new Pipeline();
+
+        var deA = await pipeline.EnviarAsync(new Mensagem("k", 1), new FakeCurrentUser());
+        var deB = await pipeline.EnviarAsync(new Mensagem("k", 1), new FakeCurrentUser());
+
+        Assert.Equal(2, pipeline.ChamadasAoHandler);
+        Assert.NotEqual(deA.Value, deB.Value);
+    }
+
+    [Fact]
+    public async Task Mesma_chave_do_mesmo_usuario_com_payload_diferente_lanca_IdempotencyKeyReusedException()
+    {
+        var pipeline = new Pipeline();
+        var ator = new FakeCurrentUser();
+        await pipeline.EnviarAsync(new Mensagem("k", 1), ator);
+
+        await Assert.ThrowsAsync<IdempotencyKeyReusedException>(() => pipeline.EnviarAsync(new Mensagem("k", 2), ator));
+        Assert.Equal(1, pipeline.ChamadasAoHandler);
+    }
+
+    [Fact]
+    public async Task Reserva_em_andamento_bloqueia_ate_expirar_e_depois_pode_ser_assumida()
+    {
+        var pipeline = new Pipeline();
+        var ator = new FakeCurrentUser();
+        var mensagem = new Mensagem("k", 1);
+
+        // Simula um processo que reservou e caiu antes do commit: a reserva ficou gravada.
+        var request = new IdempotencyRequest(
+            $"{ator.UserId}:{typeof(Mensagem).FullName}", "k",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(mensagem))));
+        pipeline.Banco.Registros[$"{request.Scope}|k"] = new IdempotencyRecord(false, request.PayloadHash, null, pipeline.Tempo.Agora);
+
+        await Assert.ThrowsAsync<OperationInProgressException>(() => pipeline.EnviarAsync(mensagem, ator));
+
+        pipeline.Tempo.Agora += new IdempotencyOptions().ReservationTimeout;
+        var assumida = await pipeline.EnviarAsync(mensagem, ator);
+
+        Assert.True(assumida.IsSuccess);
+        Assert.Equal(1, pipeline.ChamadasAoHandler);
     }
 }

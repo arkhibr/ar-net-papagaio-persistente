@@ -16,7 +16,6 @@ public class ReabrirChamadoCommandValidatorTests
 
     private static ReabrirChamadoCommand ComandoValido() => new(
         ChamadoId: Guid.NewGuid(),
-        SolicitanteId: Guid.NewGuid(),
         IdempotencyKey: "chave-1");
 
     [Fact]
@@ -35,16 +34,6 @@ public class ReabrirChamadoCommandValidatorTests
         var resultado = _validator.TestValidate(comando);
 
         resultado.ShouldHaveValidationErrorFor(c => c.ChamadoId);
-    }
-
-    [Fact]
-    public void SolicitanteId_vazio_deve_gerar_erro()
-    {
-        var comando = ComandoValido() with { SolicitanteId = Guid.Empty };
-
-        var resultado = _validator.TestValidate(comando);
-
-        resultado.ShouldHaveValidationErrorFor(c => c.SolicitanteId);
     }
 
     [Fact]
