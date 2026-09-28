@@ -27,7 +27,7 @@ internal sealed class AtribuirChamadoCommandHandler : IRequestHandler<AtribuirCh
         var chamado = await _repository.ObterParaEscritaAsync(request.ChamadoId, request.RowVersion, cancellationToken);
         if (chamado is null)
         {
-            return Result<Unit>.Failure("Chamado não encontrado.");
+            return Result<Unit>.NotFound("Chamado não encontrado.");
         }
 
         try

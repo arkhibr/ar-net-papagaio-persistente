@@ -16,7 +16,7 @@ export class CategoriasComponent implements OnInit {
 
   readonly categorias = signal<CategoriaDeServicoDto[]>([]);
   readonly carregando = signal(true);
-  readonly colunas = ['nome', 'equipeId'];
+  readonly colunas = ['nome', 'equipe'];
 
   ngOnInit(): void {
     this.catalogoApi.listarCategorias().subscribe({

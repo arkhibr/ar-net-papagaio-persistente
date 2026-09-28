@@ -9,18 +9,11 @@ namespace Catalogo.Infrastructure;
 /// ChamadosUnitOfWork.cs): cada módulo é dono da própria fronteira transacional, nunca
 /// compartilha DbContext/transação com outro módulo (arquitetura/04, arquitetura/25).
 ///
-/// Catalogo não tem, nesta rodada, nenhum Command transacional (só Queries — ver
-/// plano-de-arquitetura.md secao 5, tabela de Commands/Queries: nenhum Command aparece para
-/// Catalogo). Por isso, na prática, SaveChangesAsync nunca é chamado hoje (Query não passa
-/// pelo UnitOfWorkBehavior, arquitetura/25).
+/// Usado pelos Commands de administração do Catálogo (categorias, SLAs, equipes e membros), todos
+/// ITransactionalCommand: o UnitOfWorkBehavior chama SaveChangesAsync uma vez, depois do handler.
 ///
-/// NÃO registrada em CatalogoDependencyInjection (ver nota lá): registrar
-/// AddScoped&lt;IUnitOfWork, CatalogoUnitOfWork&gt;() colidiria silenciosamente com o registro
-/// equivalente de ChamadosUnitOfWork quando os dois módulos estiverem na mesma composição raiz
-/// (Api). Esta classe continua implementada e pronta para quando Catalogo ganhar seu primeiro
-/// Command de escrita (ex.: cadastro de CategoriaDeServico/MembroDeEquipe) — nesse momento a
-/// colisão de DI vira um problema real, resolvida por keyed services
-/// (AddKeyedScoped&lt;IUnitOfWork&gt;), não implementado agora por não haver consumidor.
+/// Registrada keyed pela chave do módulo (CatalogoDependencyInjection), sem colidir com
+/// ChamadosUnitOfWork.
 ///
 /// Único ponto da solução, dentro deste módulo, que menciona DbUpdateConcurrencyException
 /// pelo nome (arquitetura/25-transacao-e-unit-of-work.md) — mesmo sem nenhuma entidade com
@@ -46,12 +39,9 @@ internal sealed class CatalogoUnitOfWork : IUnitOfWork
         {
             // Mesmo detach de ChamadosUnitOfWork.SaveChangesAsync (ver nota lá) — mantém os dois
             // módulos com o mesmo tratamento de concorrência, mesmo sem consumidor real ainda.
-            foreach (var entry in ex.Entries)
-            {
-                entry.State = EntityState.Detached;
-            }
-
             throw new ConcurrencyException("O recurso foi alterado por outra operação.", ex);
         }
     }
+
+    public void DiscardChanges() => _dbContext.ChangeTracker.Clear();
 }

@@ -5,69 +5,24 @@ using Mediator;
 namespace Chamados.Application.Queries;
 
 /// <summary>
-/// Carrega o Chamado (leitura não rastreada, ObterSomenteLeituraAsync), guard explícito de
-/// autorização (ver ObterChamadoQuery): solicitante dono, técnico atualmente atribuído, ou
-/// membro (qualquer papel Tecnico/Supervisor) da equipe responsável, em qualquer status.
-/// Busca também o RowVersion atual (ObterRowVersionAsync) para ChamadoDetalheDto.RowVersion,
-/// que a Api usa para montar o header ETag (arquitetura/06).
-/// internal: descoberto por DI dentro do próprio assembly (arquitetura/01).
+/// Detalhe de um chamado. A autorização já rodou no pipeline (ObterChamadoQuery
+/// .IsAuthorizedAsync), então aqui só existe a leitura, projetada no banco junto com a versão.
 /// </summary>
-internal sealed class ObterChamadoQueryHandler : IRequestHandler<ObterChamadoQuery, Result<ChamadoDetalheDto>>
+internal sealed class ObterChamadoQueryHandler : IRequestHandler<ObterChamadoQuery, Result<ChamadoDetalheVersionado>>
 {
-    private readonly IChamadoRepository _repository;
-    private readonly IEquipeMembershipChecker _equipeMembershipChecker;
-    private readonly ICurrentUser _currentUser;
+    private readonly IChamadoLeitura _leitura;
 
-    public ObterChamadoQueryHandler(
-        IChamadoRepository repository,
-        IEquipeMembershipChecker equipeMembershipChecker,
-        ICurrentUser currentUser)
+    public ObterChamadoQueryHandler(IChamadoLeitura leitura)
     {
-        _repository = repository;
-        _equipeMembershipChecker = equipeMembershipChecker;
-        _currentUser = currentUser;
+        _leitura = leitura;
     }
 
-    public async ValueTask<Result<ChamadoDetalheDto>> Handle(ObterChamadoQuery request, CancellationToken cancellationToken)
+    public async ValueTask<Result<ChamadoDetalheVersionado>> Handle(ObterChamadoQuery request, CancellationToken cancellationToken)
     {
-        var chamado = await _repository.ObterSomenteLeituraAsync(request.ChamadoId, cancellationToken);
-        if (chamado is null)
-        {
-            return Result<ChamadoDetalheDto>.Failure("Chamado não encontrado.");
-        }
+        var detalhe = await _leitura.ObterDetalheAsync(request.ChamadoId, cancellationToken);
 
-        var autorizado = chamado.SolicitanteId == _currentUser.UserId
-            || chamado.TecnicoAtribuidoId == _currentUser.UserId
-            || ((_currentUser.IsInRole("Tecnico") || _currentUser.IsInRole("Supervisor"))
-                && await _equipeMembershipChecker.EhMembroDaEquipeAsync(
-                    _currentUser.UserId, chamado.EquipeId, cancellationToken));
-
-        if (!autorizado)
-        {
-            throw new AuthorizationDeniedException(
-                "Somente o solicitante, o técnico atribuído, ou um técnico/supervisor da equipe " +
-                "responsável pode ver o detalhe deste chamado.");
-        }
-
-        var rowVersion = await _repository.ObterRowVersionAsync(request.ChamadoId, cancellationToken);
-
-        var detalhe = new ChamadoDetalheDto(
-            chamado.Id,
-            chamado.SolicitanteId,
-            chamado.CategoriaId,
-            chamado.EquipeId,
-            chamado.Prioridade,
-            chamado.Status,
-            chamado.AbertoEm,
-            chamado.PrazoSla,
-            chamado.TecnicoAtribuidoId,
-            chamado.NotaResolucao,
-            chamado.ResolvidoEm,
-            chamado.FechadoEm,
-            chamado.Escalonado,
-            chamado.DataEscalonamento,
-            Convert.ToBase64String(rowVersion ?? []));
-
-        return Result<ChamadoDetalheDto>.Success(detalhe);
+        return detalhe is null
+            ? Result<ChamadoDetalheVersionado>.NotFound("Chamado não encontrado.")
+            : Result<ChamadoDetalheVersionado>.Success(detalhe);
     }
 }

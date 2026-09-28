@@ -19,7 +19,7 @@ internal sealed class DevolverChamadoCommandHandler : IRequestHandler<DevolverCh
         var chamado = await _repository.ObterParaEscritaAsync(request.ChamadoId, rowVersionEsperado: null, cancellationToken);
         if (chamado is null)
         {
-            return Result<Unit>.Failure("Chamado não encontrado.");
+            return Result<Unit>.NotFound("Chamado não encontrado.");
         }
 
         try

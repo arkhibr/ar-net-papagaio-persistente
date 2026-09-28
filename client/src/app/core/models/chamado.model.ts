@@ -39,5 +39,13 @@ export interface ChamadoDetalheDto {
   fechadoEm: string | null;
   escalonado: boolean;
   dataEscalonamento: string | null;
-  rowVersion: string;
+}
+
+/**
+ * Detalhe mais o ETag do `GET /chamados/{id}`. A versão de concorrência só existe no header,
+ * nunca no corpo: é opaca e volta como veio no `If-Match` do `atribuir`.
+ */
+export interface ChamadoComVersao {
+  chamado: ChamadoDetalheDto;
+  etag: string | null;
 }

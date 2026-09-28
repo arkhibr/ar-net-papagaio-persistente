@@ -14,7 +14,6 @@ internal sealed class ReabrirChamadoCommandValidator : AbstractValidator<Reabrir
     public ReabrirChamadoCommandValidator()
     {
         RuleFor(c => c.ChamadoId).NotEmpty();
-        RuleFor(c => c.SolicitanteId).NotEmpty();
         RuleFor(c => c.IdempotencyKey).NotEmpty();
     }
 }

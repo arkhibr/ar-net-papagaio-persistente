@@ -1,38 +1,54 @@
 namespace SharedKernel.Messaging;
 
 /// <summary>
-/// Porta estreita que o IdempotencyBehavior usa para reservar/consultar/concluir uma
-/// Idempotency-Key. Implementação real mora na Infrastructure (mesmo DbContext scoped
-/// do UnitOfWork, ver arquitetura/25-transacao-e-unit-of-work.md); aqui só o contrato,
-/// para o behavior poder ser testado com um fake em Application.UnitTests.
+/// Identidade de uma requisição idempotente: a chave do cliente vale só dentro do Scope
+/// (usuário + tipo do Command); PayloadHash distingue um reenvio legítimo de um reuso da chave
+/// para outra requisição (arquitetura/06, "protege contra reenvio da mesma requisição").
+/// </summary>
+public sealed record IdempotencyRequest(string Scope, string Key, string PayloadHash);
+
+public sealed record IdempotencyRecord(
+    bool IsCompleted, string PayloadHash, string? SerializedResponse, DateTimeOffset ReservedAt);
+
+/// <summary>
+/// Porta que o IdempotencyBehavior/UnitOfWorkBehavior usam para a Idempotency-Key. A
+/// implementação real mora na Infrastructure de cada módulo, no mesmo DbContext do IUnitOfWork
+/// daquele módulo (arquitetura/25, "Idempotência participa da mesma transação").
+///
+/// Transações: a reserva é o único passo gravado sozinho, antes do handler, porque precisa
+/// ficar visível para uma requisição concorrente (lacuna D1 de achados.md). A conclusão é só
+/// encenada (StageCompletionAsync) e vai no mesmo SaveChanges do UnitOfWorkBehavior que grava a
+/// mudança de negócio.
 /// </summary>
 public interface IIdempotencyStore
 {
-    /// <summary>
-    /// Registro de uma chave já vista, se existir. Nulo quando é a primeira chegada.
-    /// </summary>
-    Task<IdempotencyRecord?> FindAsync(string idempotencyKey, CancellationToken cancellationToken);
+    Task<IdempotencyRecord?> FindAsync(IdempotencyRequest request, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reserva a chave como "em andamento". Chamada só quando FindAsync não achou nada.
+    /// Grava a reserva "em andamento" (commit próprio). Se outra requisição reservou a mesma
+    /// chave antes (corrida), lança OperationInProgressException.
     /// </summary>
-    Task ReserveAsync(string idempotencyKey, CancellationToken cancellationToken);
+    Task ReserveAsync(IdempotencyRequest request, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Marca a chave como concluída, guardando a resposta serializada para reenvios futuros.
-    /// Encenada no mesmo DbContext do UnitOfWork; a marcação em si não é responsabilidade
-    /// deste stub decidir quando committar — isso é o UnitOfWorkBehavior.
+    /// Assume uma reserva expirada (processo caiu antes do commit). Só uma requisição vence:
+    /// devolve false se outra já assumiu ou concluiu a reserva desde a leitura.
     /// </summary>
-    Task CompleteAsync(string idempotencyKey, string serializedResponse, CancellationToken cancellationToken);
+    Task<bool> TryRenewReservationAsync(
+        IdempotencyRequest request, DateTimeOffset previousReservedAt, CancellationToken cancellationToken);
+
+    /// <summary>Encena a conclusão no DbContext do módulo, sem gravar; o commit é do UnitOfWorkBehavior.</summary>
+    Task StageCompletionAsync(IdempotencyRequest request, string serializedResponse, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Libera uma reserva "em andamento" sem concluí-la, chamada quando o handler propaga uma
-    /// falha transitória de infraestrutura (ex.: ConcurrencyException) — nunca chamada para
-    /// falha de negócio determinística (Result.Failure), que é sempre concluída via
-    /// CompleteAsync. Sem isso, a chave ficaria travada como "em andamento" para sempre,
-    /// bloqueando qualquer nova tentativa legítima com OperationInProgressException.
+    /// Conclui com commit próprio. Só para Command idempotente que não é ITransactionalCommand
+    /// (não passa pelo UnitOfWorkBehavior).
     /// </summary>
-    Task ReleaseAsync(string idempotencyKey, CancellationToken cancellationToken);
+    Task CompleteAsync(IdempotencyRequest request, string serializedResponse, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Descarta o que estiver pendente no DbContext e apaga a reserva, com commit próprio.
+    /// Chamada quando o handler ou o commit lançam exceção; nunca grava a mudança de negócio.
+    /// </summary>
+    Task ReleaseAsync(IdempotencyRequest request, CancellationToken cancellationToken);
 }
-
-public sealed record IdempotencyRecord(string IdempotencyKey, bool IsCompleted, string? SerializedResponse);

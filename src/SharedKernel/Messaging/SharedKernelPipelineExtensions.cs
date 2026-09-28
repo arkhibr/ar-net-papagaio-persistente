@@ -1,6 +1,8 @@
 using Mediator;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SharedKernel.Modules;
 
 namespace SharedKernel.Messaging;
 
@@ -41,6 +43,16 @@ public static class SharedKernelPipelineExtensions
     public static IServiceCollection AddSharedKernelPipeline(this IServiceCollection services)
     {
         services.AddMemoryCache();
+        services.TryAddSingleton<ICacheInvalidator, MemoryCacheInvalidator>();
+        services.AddOptions<IdempotencyOptions>();
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Portas do SharedKernel resolvidas pelo módulo dono da mensagem (P1/M11 de achados.md):
+        // cada Add{Modulo}Module declara os próprios assemblies (AddModuleRoute) e registra as
+        // próprias implementações keyed pela chave do módulo.
+        services.TryAddSingleton<ModuleRouter>();
+        services.TryAddScoped(typeof(IModuleService<>), typeof(ModuleService<>));
+        services.TryAddScoped<PendingIdempotency>();
 
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));

@@ -8,9 +8,13 @@
         <a routerLink="/equipe/fila" routerLinkActive="link-ativo">Fila da equipe</a>
       }
       <a routerLink="/categorias" routerLinkActive="link-ativo">Categorias</a>
+      @if (session.hasRole('Supervisor')) {
+        <a routerLink="/administracao/categorias" routerLinkActive="link-ativo">Admin. categorias</a>
+        <a routerLink="/administracao/equipes" routerLinkActive="link-ativo">Admin. equipes</a>
+      }
     </nav>
     <span class="spacer"></span>
-    <span class="usuario">{{ usuario.roles.join(', ') }}</span>
+    <span class="usuario">{{ usuario.nome ?? usuario.papeis.join(', ') }}</span>
     <button mat-button class="acao-sair" (click)="sair()">Sair</button>
   </mat-toolbar>
 }

@@ -55,6 +55,14 @@
     <!-- Gerador nativo de OpenAPI (.NET 9+, recomendado em 18-versionamento-de-api.md em vez de
          Swashbuckle). Documento mínimo, sem UI de exploração adicional nesta rodada. -->
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- BFF (adaptacao-bff-angular.md, B6/B7/B10): store técnico da borda (sessão server-side,
+         chaves de Data Protection, credencial local) em banco relacional (decisão D3). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Api.IntegrationTests" />
   </ItemGroup>
 
 </Project>

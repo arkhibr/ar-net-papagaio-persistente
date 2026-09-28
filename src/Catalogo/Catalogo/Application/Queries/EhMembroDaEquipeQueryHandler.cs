@@ -6,8 +6,7 @@ namespace Catalogo.Application.Queries;
 
 /// <summary>
 /// Implementação real da Query pública Catalogo.Contracts.EhMembroDaEquipeQuery. Consultada
-/// pela implementação de Chamados.Application.IEquipeMembershipChecker (Infrastructure), a
-/// partir do guard explícito de ReclassificarChamadoCommandHandler. Checagem determinística
+/// pela implementação de Chamados.Infrastructure.ChamadoAuthorizationContext. Checagem determinística
 /// de vínculo — sempre Result.Success (verdadeiro ou falso), nunca Failure: "não é membro"
 /// não é falha de negócio, é a resposta esperada da consulta.
 /// internal: descoberto por DI dentro do próprio assembly (arquitetura/01).

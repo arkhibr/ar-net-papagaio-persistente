@@ -44,6 +44,6 @@ public sealed class EquipesController : ControllerBase
             new FilaDaEquipeQuery(paginaValida, tamanhoValido), cancellationToken);
 
         return resultado.ToActionResult(
-            items => Ok(PagedResponse<ChamadoResumoDto>.DeListaSemContagemTotal(items, paginaValida, tamanhoValido)));
+            pagina => Ok(PagedResponse<ChamadoResumoDto>.De(pagina, paginaValida, tamanhoValido)));
     }
 }

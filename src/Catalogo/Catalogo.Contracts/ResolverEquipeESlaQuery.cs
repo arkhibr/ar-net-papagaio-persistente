@@ -13,4 +13,8 @@ namespace Catalogo.Contracts;
 public sealed record ResolverEquipeESlaQuery(Guid CategoriaId, PrioridadeServico Prioridade)
     : IRequest<Result<ResolverEquipeESlaResultado>>;
 
-public sealed record ResolverEquipeESlaResultado(Guid EquipeId, int HorasDeSla);
+/// <summary>
+/// CategoriaAtiva: a abertura recusa categoria inativa; a reclassificação de um chamado que já
+/// existe continua funcionando (a categoria nunca é apagada, B6 de achados.md).
+/// </summary>
+public sealed record ResolverEquipeESlaResultado(Guid EquipeId, int HorasDeSla, bool CategoriaAtiva = true);

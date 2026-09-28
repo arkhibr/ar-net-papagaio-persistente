@@ -1,15 +1,22 @@
+using Catalogo.Contracts;
 using Catalogo.Domain;
 
 namespace Catalogo.Application;
 
 /// <summary>
-/// Porta de repositório do agregado CategoriaDeServico. Implementação real (EF Core) mora
-/// na Infrastructure, fora do escopo de Application.UnitTests (persistencia-e-integracao).
-/// ListarTodasAsync é leitura pura (no-tracking na implementação real).
+/// Categorias de serviço. Leitura por projeção direta no banco, sem materializar o agregado
+/// (arquitetura/27); escrita carrega o agregado rastreado, e o commit é do UnitOfWorkBehavior
+/// (arquitetura/25).
 /// </summary>
 internal interface ICategoriaDeServicoRepository
 {
-    Task<IReadOnlyList<CategoriaDeServico>> ListarTodasAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<CategoriaDeServicoDto>> ListarAsync(bool incluirInativas, CancellationToken cancellationToken);
 
-    Task<CategoriaDeServico?> ObterPorIdAsync(Guid categoriaId, CancellationToken cancellationToken);
+    /// <summary>Equipe da categoria, horas de SLA da prioridade (null se não houver) e se a categoria está ativa.</summary>
+    Task<(Guid EquipeId, int? HorasDeSla, bool Ativa)?> ObterEquipeESlaAsync(
+        Guid categoriaId, PrioridadeServico prioridade, CancellationToken cancellationToken);
+
+    Task AdicionarAsync(CategoriaDeServico categoria, CancellationToken cancellationToken);
+
+    Task<CategoriaDeServico?> ObterParaEscritaAsync(Guid categoriaId, CancellationToken cancellationToken);
 }

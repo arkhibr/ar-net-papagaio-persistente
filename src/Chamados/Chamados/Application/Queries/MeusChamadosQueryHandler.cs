@@ -4,34 +4,24 @@ using Mediator;
 
 namespace Chamados.Application.Queries;
 
-/// <summary>
-/// Resolve _currentUser.UserId e chama IChamadoRepository.ListarPorSolicitanteAsync com ele —
-/// nunca aceita um SolicitanteId vindo do próprio Command (filtro por linha).
-/// internal: descoberto por DI dentro do próprio assembly (arquitetura/01).
-/// </summary>
-internal sealed class MeusChamadosQueryHandler : IRequestHandler<MeusChamadosQuery, Result<IReadOnlyList<ChamadoResumoDto>>>
+/// <summary>Chamados do solicitante autenticado; o filtro por linha vem de ICurrentUser, nunca da requisição.</summary>
+internal sealed class MeusChamadosQueryHandler : IRequestHandler<MeusChamadosQuery, Result<PagedResult<ChamadoResumoDto>>>
 {
-    private readonly IChamadoRepository _repository;
+    private readonly IChamadoLeitura _leitura;
     private readonly ICurrentUser _currentUser;
 
-    public MeusChamadosQueryHandler(IChamadoRepository repository, ICurrentUser currentUser)
+    public MeusChamadosQueryHandler(IChamadoLeitura leitura, ICurrentUser currentUser)
     {
-        _repository = repository;
+        _leitura = leitura;
         _currentUser = currentUser;
     }
 
-    public async ValueTask<Result<IReadOnlyList<ChamadoResumoDto>>> Handle(
+    public async ValueTask<Result<PagedResult<ChamadoResumoDto>>> Handle(
         MeusChamadosQuery request, CancellationToken cancellationToken)
     {
-        var chamados = await _repository.ListarPorSolicitanteAsync(
+        var pagina = await _leitura.ListarPorSolicitanteAsync(
             _currentUser.UserId, request.Page, request.PageSize, cancellationToken);
 
-        var resumos = chamados
-            .Select(c => new ChamadoResumoDto(
-                c.Id, c.CategoriaId, c.EquipeId, c.Prioridade, c.Status, c.AbertoEm, c.PrazoSla,
-                c.TecnicoAtribuidoId, c.Escalonado))
-            .ToList();
-
-        return Result<IReadOnlyList<ChamadoResumoDto>>.Success(resumos);
+        return Result<PagedResult<ChamadoResumoDto>>.Success(pagina);
     }
 }

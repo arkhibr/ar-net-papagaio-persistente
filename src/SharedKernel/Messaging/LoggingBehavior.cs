@@ -46,14 +46,31 @@ public sealed class LoggingBehavior<TMessage, TResponse> : IPipelineBehavior<TMe
         }
         catch (Exception ex)
         {
-            // Log e rethrow: a exceção nunca é mascarada aqui, só registrada. O tratamento
-            // (Result.Failure vs. exceção -> status HTTP) continua responsabilidade do handler
-            // e do GlobalExceptionHandler (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md).
-            _logger.LogError(
-                ex,
-                "Falha em {Mensagem} após {DuracaoMs}ms",
-                nomeDaMensagem,
-                System.Diagnostics.Stopwatch.GetElapsedTime(inicio).TotalMilliseconds);
+            // Log e rethrow: a exceção nunca é mascarada aqui. Nível pela natureza da falha
+            // (arquitetura/15): falha com caminho esperado (400/403/404/409/412/422) é
+            // Information, sem stack trace; DomainException que escapou do handler é anomalia
+            // (Warning); o resto é Error com stack trace, marcado para o GlobalExceptionHandler
+            // não repetir o registro.
+            var duracaoMs = System.Diagnostics.Stopwatch.GetElapsedTime(inicio).TotalMilliseconds;
+
+            if (ExceptionLogging.IsExpected(ex))
+            {
+                _logger.LogInformation(
+                    "Falha esperada em {Mensagem} após {DuracaoMs}ms: {TipoDeFalha}",
+                    nomeDaMensagem, duracaoMs, ex.GetType().Name);
+            }
+            else if (ex is DomainException)
+            {
+                _logger.LogWarning(
+                    ex, "DomainException não capturada pelo handler de {Mensagem} após {DuracaoMs}ms",
+                    nomeDaMensagem, duracaoMs);
+                ExceptionLogging.MarkLogged(ex);
+            }
+            else
+            {
+                _logger.LogError(ex, "Falha em {Mensagem} após {DuracaoMs}ms", nomeDaMensagem, duracaoMs);
+                ExceptionLogging.MarkLogged(ex);
+            }
 
             throw;
         }

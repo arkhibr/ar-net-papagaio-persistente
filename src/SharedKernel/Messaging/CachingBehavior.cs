@@ -4,30 +4,18 @@ using Microsoft.Extensions.Caching.Memory;
 namespace SharedKernel.Messaging;
 
 /// <summary>
-/// Quinto elo da ordem fixa (Logging → Validation → Authorization → Idempotency → Caching →
-/// Handler, arquitetura/03-commands-e-queries.md, arquitetura/24-cache.md). Roda só para
-/// TMessage : ICacheableQuery — hoje só CategoriasDeServicoQuery (Catalogo) usa o marcador.
+/// Quinto elo da ordem fixa (arquitetura/03-commands-e-queries.md, arquitetura/24-cache.md).
+/// Roda só para TMessage : ICacheableQuery.
 ///
-/// Abstração: IMemoryCache (Microsoft.Extensions.Caching.Memory), não HybridCache. Divergência
-/// consciente do exemplo de referência de arquitetura/24-cache.md (que sugere HybridCache/.NET
-/// 9+ com L1+L2 e invalidação por tag nativa via RemoveByTagAsync): esta solution ainda não tem
-/// um store L2 compartilhado (Redis) provisionado para módulos de leitura, e o próprio
-/// documento 24 aceita IMemoryCache por réplica "quando o dado tolera divergência entre
-/// réplicas e a invalidação não precisa ser imediata em todas" — caso de
-/// CategoriasDeServicoQuery (catálogo de referência, baixa frequência de mudança). Reavaliar
-/// para HybridCache/L2 quando um módulo precisar de invalidação por tag disparada por Command
-/// entre réplicas (nenhum Command invalida cache nesta rodada).
+/// Chave física: tipo da Query + CacheKey + usuário autenticado. O escopo por ator é o padrão;
+/// só uma Query que implementa IGlobalCacheableQuery compartilha a entrada entre usuários
+/// (arquitetura/24, "Chave sempre com o escopo do ator"). O prefixo com o tipo evita que duas
+/// Queries com a mesma CacheKey sobrescrevam uma à outra.
 ///
-/// TTL fixo de 60s (ponto de ajuste por Query se necessário — hoje só uma Query cacheável,
-/// então não há por onde variar TTL por caso de uso ainda; quando isso for necessário, o TTL
-/// vira propriedade de ICacheableQuery em vez de constante deste behavior).
-///
-/// Chave física NÃO inclui escopo de ator: arquitetura/24 exige isso só quando o dado tem
-/// escopo por usuário. CategoriasDeServicoQuery é dado global (catálogo de referência, mesmo
-/// resultado para qualquer autenticado — ver CategoriasDeServicoQuery, "papel: qualquer
-/// autenticado"), então a chave usa só message.CacheKey. Se uma Query cacheável futura tiver
-/// escopo por ator, este behavior precisa ganhar a mesma regra de composição de chave do
-/// documento 24 antes de ser usada para ela — não implementado agora por não haver caso real.
+/// Abstração: IMemoryCache, não HybridCache. Divergência consciente do exemplo de referência de
+/// arquitetura/24 (sem store L2 provisionado); o próprio documento aceita IMemoryCache por réplica
+/// quando o dado tolera divergência entre réplicas. TTL fixo de 60s até existir uma segunda Query
+/// cacheável (B7 de achados.md).
 /// </summary>
 public sealed class CachingBehavior<TMessage, TResponse> : IPipelineBehavior<TMessage, TResponse>
     where TMessage : IMessage, ICacheableQuery
@@ -35,24 +23,35 @@ public sealed class CachingBehavior<TMessage, TResponse> : IPipelineBehavior<TMe
     private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60);
 
     private readonly IMemoryCache _cache;
+    private readonly ICurrentUser _currentUser;
 
-    public CachingBehavior(IMemoryCache cache)
+    public CachingBehavior(IMemoryCache cache, ICurrentUser currentUser)
     {
         _cache = cache;
+        _currentUser = currentUser;
     }
 
     public async ValueTask<TResponse> Handle(
         TMessage message, MessageHandlerDelegate<TMessage, TResponse> next, CancellationToken cancellationToken)
     {
-        if (_cache.TryGetValue(message.CacheKey, out TResponse? cached) && cached is not null)
+        var chave = ChaveFisica(message);
+
+        if (_cache.TryGetValue(chave, out TResponse? cached) && cached is not null)
         {
             return cached;
         }
 
         var response = await next(message, cancellationToken);
 
-        _cache.Set(message.CacheKey, response, Ttl);
+        _cache.Set(chave, response, Ttl);
 
         return response;
+    }
+
+    private string ChaveFisica(TMessage message)
+    {
+        var chave = ChaveDeCache.Global(typeof(TMessage), message.CacheKey);
+
+        return message is IGlobalCacheableQuery ? chave : $"{chave}:ator={_currentUser.UserId}";
     }
 }

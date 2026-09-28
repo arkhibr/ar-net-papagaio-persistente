@@ -5,11 +5,11 @@ using Mediator;
 namespace Catalogo.Application.Queries;
 
 /// <summary>
-/// Implementação real da Query pública Catalogo.Contracts.ResolverEquipeESlaQuery. Resolve
-/// a EquipeId a partir da categoria e as horas de SLA a partir da prioridade
-/// (Critica 4h, Alta 8h, Media 24h, Baixa 72h — especificacao-clarificada.md).
-/// internal: descoberto por DI dentro do próprio assembly, implementa IRequestHandler
-/// diretamente (arquitetura/01 — Contracts não expõe handler, nem uma interface derivada dele).
+/// Snapshot de equipe responsável e SLA (horas) de uma categoria para uma prioridade, consumido
+/// por Chamados ao abrir/reclassificar (arquitetura/29 §1). O SLA vem da tabela de referência
+/// SlasDeCategoria (M13 de achados.md); categoria sem SLA para a prioridade é falha de negócio,
+/// nunca exceção. A categoria inativa não é falha aqui: quem decide é o chamador (a abertura
+/// recusa, a reclassificação de um chamado existente aceita).
 /// </summary>
 internal sealed class ResolverEquipeESlaQueryHandler
     : IRequestHandler<ResolverEquipeESlaQuery, Result<ResolverEquipeESlaResultado>>
@@ -24,24 +24,19 @@ internal sealed class ResolverEquipeESlaQueryHandler
     public async ValueTask<Result<ResolverEquipeESlaResultado>> Handle(
         ResolverEquipeESlaQuery request, CancellationToken cancellationToken)
     {
-        var categoria = await _repository.ObterPorIdAsync(request.CategoriaId, cancellationToken);
+        var categoria = await _repository.ObterEquipeESlaAsync(request.CategoriaId, request.Prioridade, cancellationToken);
         if (categoria is null)
         {
             return Result<ResolverEquipeESlaResultado>.Failure("Categoria de serviço não encontrada.");
         }
 
-        var horasDeSla = HorasDeSlaPara(request.Prioridade);
+        var (equipeId, horasDeSla, ativa) = categoria.Value;
+        if (horasDeSla is null)
+        {
+            return Result<ResolverEquipeESlaResultado>.Failure(
+                $"A categoria de serviço não tem SLA definido para a prioridade {request.Prioridade}.");
+        }
 
-        return Result<ResolverEquipeESlaResultado>.Success(
-            new ResolverEquipeESlaResultado(categoria.EquipeId, horasDeSla));
+        return Result<ResolverEquipeESlaResultado>.Success(new ResolverEquipeESlaResultado(equipeId, horasDeSla.Value, ativa));
     }
-
-    private static int HorasDeSlaPara(PrioridadeServico prioridade) => prioridade switch
-    {
-        PrioridadeServico.Critica => 4,
-        PrioridadeServico.Alta => 8,
-        PrioridadeServico.Media => 24,
-        PrioridadeServico.Baixa => 72,
-        _ => throw new ArgumentOutOfRangeException(nameof(prioridade), prioridade, "Prioridade desconhecida."),
-    };
 }

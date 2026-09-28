@@ -31,6 +31,24 @@ internal sealed class CategoriaDeServicoConfiguration : IEntityTypeConfiguration
         builder.Property(c => c.EquipeId)
             .IsRequired();
 
+        // Nunca apagada, só inativada (B6 de achados.md). Padrão true para linhas antigas.
+        builder.Property(c => c.Ativa)
+            .IsRequired()
+            .HasDefaultValue(true);
+
+        // Tabela de referência de SLA por prioridade (M13 de achados.md). Chave (CategoriaId,
+        // Prioridade): no máximo um SLA por prioridade em cada categoria.
+        builder.OwnsMany(c => c.Slas, sla =>
+        {
+            sla.ToTable("SlasDeCategoria");
+            sla.WithOwner().HasForeignKey("CategoriaId");
+            sla.Property<Guid>("CategoriaId");
+            sla.HasKey("CategoriaId", nameof(SlaDaCategoria.Prioridade));
+            sla.Property(s => s.Prioridade).HasConversion<int>();
+            sla.Property(s => s.Horas).IsRequired();
+        });
+        builder.Navigation(c => c.Slas).HasField("_slas");
+
         builder.UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

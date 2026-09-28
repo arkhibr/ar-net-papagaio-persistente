@@ -84,6 +84,9 @@ internal sealed class ChamadoConfiguration : IEntityTypeConfiguration<Chamado>
         builder.HasIndex(c => c.SolicitanteId);
         builder.HasIndex(c => new { c.EquipeId, c.Status });
 
+        // Eventos de domínio vivem só em memória até o ChamadosUnitOfWork consumi-los.
+        builder.Ignore(c => c.DomainEvents);
+
         builder.UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

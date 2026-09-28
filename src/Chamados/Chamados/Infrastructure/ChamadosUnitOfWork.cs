@@ -1,46 +1,74 @@
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using SharedKernel;
+using SharedKernel.Domain;
 
 namespace Chamados.Infrastructure;
 
 /// <summary>
-/// Implementação real de IUnitOfWork para o módulo Chamados. Um UnitOfWork por módulo (ver
-/// nota em Catalogo/Infrastructure/CatalogoUnitOfWork.cs) — cada módulo é dono da própria
-/// fronteira transacional, nunca compartilha DbContext/transação com outro módulo.
+/// IUnitOfWork do módulo Chamados, registrado keyed pela chave do módulo. Cada módulo é dono da
+/// própria fronteira transacional.
 ///
-/// Único ponto da solução que menciona DbUpdateConcurrencyException pelo nome
-/// (arquitetura/25-transacao-e-unit-of-work.md), traduzindo para ConcurrencyException
-/// (SharedKernel) antes de propagar — nunca um Result.Failure, porque é falha transitória de
-/// infraestrutura, não determinística (uma nova tentativa pode ter sucesso;
-/// plano-de-arquitetura.md secao 5, "Concorrência otimista").
+/// Antes do único SaveChanges, materializa um RegistroAuditoria para cada evento de domínio
+/// IAuditable levantado pelos agregados rastreados, com o ator de ICurrentUser, na mesma
+/// transação da mudança (arquitetura/21, "Atomicidade da gravação"; A5 de achados.md). Sem
+/// ISaveChangesInterceptor: a materialização fica explícita aqui.
+///
+/// Único ponto que nomeia DbUpdateConcurrencyException (arquitetura/25), traduzida para
+/// ConcurrencyException: falha transitória, nunca Result.Failure.
 /// </summary>
 internal sealed class ChamadosUnitOfWork : IUnitOfWork
 {
     private readonly ChamadosDbContext _dbContext;
+    private readonly ICurrentUser _currentUser;
+    private readonly TimeProvider _timeProvider;
 
-    public ChamadosUnitOfWork(ChamadosDbContext dbContext)
+    public ChamadosUnitOfWork(ChamadosDbContext dbContext, ICurrentUser currentUser, TimeProvider timeProvider)
     {
         _dbContext = dbContext;
+        _currentUser = currentUser;
+        _timeProvider = timeProvider;
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken)
     {
+        MaterializarAuditoria();
+
         try
         {
             return await _dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            // Detach das entidades que causaram o conflito: o EF Core não faz isso sozinho, e
-            // sem isso o IdempotencyStore.ReleaseAsync/CompleteAsync (SaveChanges isolado, ver
-            // nota lá) tenta de novo o mesmo UPDATE que acabou de falhar, lançando uma segunda
-            // DbUpdateConcurrencyException crua (sem tradução) que mascara esta aqui.
-            foreach (var entry in ex.Entries)
+            throw new ConcurrencyException("O recurso foi alterado por outra operação.", ex);
+        }
+    }
+
+    public void DiscardChanges() => _dbContext.ChangeTracker.Clear();
+
+    private void MaterializarAuditoria()
+    {
+        var agregados = _dbContext.ChangeTracker.Entries<AggregateRoot>()
+            .Select(entry => entry.Entity)
+            .Where(agregado => agregado.DomainEvents.Count > 0)
+            .ToList();
+
+        if (agregados.Count == 0)
+        {
+            return;
+        }
+
+        var agora = _timeProvider.GetUtcNow();
+        var correlationId = Activity.Current?.TraceId.ToString();
+
+        foreach (var agregado in agregados)
+        {
+            foreach (var evento in agregado.DomainEvents.OfType<IAuditable>())
             {
-                entry.State = EntityState.Detached;
+                _dbContext.RegistrosAuditoria.Add(RegistroAuditoriaEntity.De(evento, _currentUser, agora, correlationId));
             }
 
-            throw new ConcurrencyException("O recurso foi alterado por outra operação.", ex);
+            agregado.ClearDomainEvents();
         }
     }
 }

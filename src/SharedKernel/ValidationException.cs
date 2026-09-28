@@ -2,12 +2,10 @@ namespace SharedKernel;
 
 /// <summary>
 /// Um erro de validação sintática de um campo específico (arquitetura/16-validacao-sintatica-vs-invariante.md).
-/// PropertyName é o nome do campo do Command/Query violado (equivalente ao "pointer" do corpo
-/// RFC 9457 descrito em arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md); a
-/// serialização HTTP em si (o Problem Details completo) é responsabilidade do
-/// GlobalExceptionHandler na Api, não deste tipo.
+/// PropertyName é o nome do campo do Command/Query violado e ErrorCode o código da regra
+/// (FluentValidation); a tradução para "pointer"/"codigo" do corpo RFC 9457 é da Api.
 /// </summary>
-public sealed record ValidationError(string PropertyName, string ErrorMessage);
+public sealed record ValidationError(string PropertyName, string ErrorMessage, string ErrorCode);
 
 /// <summary>
 /// Lançada pelo ValidationBehavior quando um ou mais IValidator&lt;TMessage&gt; (FluentValidation)

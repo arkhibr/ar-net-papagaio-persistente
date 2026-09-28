@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharedKernel;
 
+
 namespace Api.Controllers.Chamados;
 
 /// <summary>
@@ -22,12 +23,10 @@ namespace Api.Controllers.Chamados;
 /// Decisão sobre id da rota vs. corpo (não 100% explícita no plano, registrada aqui): toda
 /// action de transição usa {id} da rota como o ChamadoId do Command — nunca duplicado no corpo
 /// da requisição (um único "id" por operação, sem checagem de consistência rota-vs-corpo a
-/// fazer, e sem o cliente poder mandar um ChamadoId divergente por engano). Os únicos dois
-/// campos "escondidos" do cliente e resolvidos pelo controller, nunca aceitos como entrada
-/// direta, são SolicitanteId (sempre de ICurrentUser.UserId ou, em Fechar/Reabrir, do próprio
-/// Chamado já carregado — ver FecharAsync/ReabrirAsync) e RowVersion em Atribuir (do header
-/// If-Match, nunca do corpo — arquitetura/06, "ETag/If-Match é a superfície HTTP do mesmo
-/// RowVersion").
+/// fazer, e sem o cliente poder mandar um ChamadoId divergente por engano). Identidade nunca
+/// vem do corpo: SolicitanteId (Abrir) e TecnicoId (Atribuir) saem de ICurrentUser
+/// (arquitetura/11); RowVersion em Atribuir sai do header If-Match (arquitetura/06). O vínculo
+/// do usuário com o chamado é conferido no pipeline (IsAuthorizedAsync), nunca aqui.
 /// </summary>
 [ApiController]
 [ApiVersion("1.0")]
@@ -35,10 +34,12 @@ namespace Api.Controllers.Chamados;
 public sealed class ChamadosController : ControllerBase
 {
     private readonly ISender _sender;
+    private readonly ICurrentUser _currentUser;
 
-    public ChamadosController(ISender sender)
+    public ChamadosController(ISender sender, ICurrentUser currentUser)
     {
         _sender = sender;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -61,7 +62,7 @@ public sealed class ChamadosController : ControllerBase
         }
 
         var command = new AbrirChamadoCommand(
-            SolicitanteIdAtual, request.CategoriaId, request.Prioridade, idempotencyKey);
+            _currentUser.UserId, request.CategoriaId, request.Prioridade, idempotencyKey);
 
         var resultado = await _sender.Send(command, cancellationToken);
 
@@ -76,14 +77,12 @@ public sealed class ChamadosController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/v1/chamados/{id} — ObterChamadoQuery. Guard de autorização dentro do handler
-    /// (ver ObterChamadoQuery).
+    /// GET /api/v1/chamados/{id} — ObterChamadoQuery. Autorização no pipeline; "não existe" e
+    /// "sem acesso" respondem o mesmo 404 (M3 de achados.md).
     ///
-    /// ETag (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md): a resposta
-    /// inclui o header ETag com ChamadoDetalheDto.RowVersion (opaco, base64), fechando o ciclo
-    /// que faltava para AtribuirAsync — o cliente lê o ETag aqui e devolve via If-Match sem
-    /// nunca interpretar o valor. Achado de revisão de código + testes-manuais.md; antes desta
-    /// correção, AtribuirAsync exigia If-Match sem nenhum GET fornecer um valor legítimo.
+    /// ETag (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md): a versão lida
+    /// na mesma consulta do corpo vai só no header ETag (opaco, base64); o cliente a devolve via
+    /// If-Match sem nunca interpretar o valor.
     /// </summary>
     [HttpGet("{id:guid}")]
     [Authorize]
@@ -91,12 +90,12 @@ public sealed class ChamadosController : ControllerBase
     {
         var resultado = await _sender.Send(new ObterChamadoQuery(id), cancellationToken);
 
-        if (resultado.IsSuccess)
+        return resultado.ToActionResult(detalhe =>
         {
-            Response.Headers.ETag = $"\"{resultado.Value!.RowVersion}\"";
-        }
-
-        return resultado.ToActionResult();
+            // A versão só existe no header ETag, nunca no corpo (arquitetura/06; M6 de achados.md).
+            Response.Headers.ETag = $"\"{detalhe.Versao}\"";
+            return Ok(detalhe.Chamado);
+        });
     }
 
     /// <summary>
@@ -115,20 +114,18 @@ public sealed class ChamadosController : ControllerBase
             new MeusChamadosQuery(paginaValida, tamanhoValido), cancellationToken);
 
         return resultado.ToActionResult(
-            items => Ok(PagedResponse<ChamadoResumoDto>.DeListaSemContagemTotal(items, paginaValida, tamanhoValido)));
+            pagina => Ok(PagedResponse<ChamadoResumoDto>.De(pagina, paginaValida, tamanhoValido)));
     }
 
     /// <summary>
-    /// POST /api/v1/chamados/{id}/atribuir — AtribuirChamadoCommand. Idempotency-Key +
-    /// If-Match/RowVersion (plano-de-arquitetura.md secao 6: "único ponto de disputa
-    /// concorrente descrita"). RowVersion vem do header If-Match (opaco, base64 do shadow
-    /// property EF Core), nunca de um campo no corpo (arquitetura/06).
+    /// POST /api/v1/chamados/{id}/atribuir — AtribuirChamadoCommand (autoatribuição: o técnico é
+    /// sempre o usuário autenticado, sem corpo; A1 de achados.md). Idempotency-Key +
+    /// If-Match/RowVersion (plano-de-arquitetura.md secao 6). ETag desatualizado → 412.
     /// </summary>
     [HttpPost("{id:guid}/atribuir")]
     [Authorize]
     public async Task<IActionResult> AtribuirAsync(
         Guid id,
-        [FromBody] AtribuirChamadoRequest request,
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         [FromHeader(Name = "If-Match")] string? ifMatch,
         CancellationToken cancellationToken)
@@ -140,13 +137,12 @@ public sealed class ChamadosController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(ifMatch) || !TentarDecodificarRowVersion(ifMatch, out var rowVersion))
         {
-            return Problem(
-                title: "Cabeçalho If-Match ausente ou inválido",
-                detail: "A atribuição de um chamado exige o cabeçalho If-Match com o ETag obtido em GET /api/v1/chamados/{id}.",
-                statusCode: StatusCodes.Status400BadRequest);
+            return new ProblemResult(HttpErrors.MissingHeader(
+                "If-Match",
+                "A atribuição de um chamado exige o cabeçalho If-Match com o ETag obtido em GET /api/v1/chamados/{id}."));
         }
 
-        var command = new AtribuirChamadoCommand(id, request.TecnicoId, rowVersion, idempotencyKey);
+        var command = new AtribuirChamadoCommand(id, _currentUser.UserId, rowVersion, idempotencyKey);
 
         var resultado = await _sender.Send(command, cancellationToken);
 
@@ -214,14 +210,9 @@ public sealed class ChamadosController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/v1/chamados/{id}/fechar — FecharChamadoCommand. FecharChamadoCommand exige
-    /// SolicitanteId no próprio Command (comparado contra ICurrentUser.UserId OU
-    /// IsSystemActor dentro de IsAuthorizedAsync — ver FecharChamadoCommandAuthorizationTests).
-    /// O controller NUNCA aceita esse SolicitanteId do cliente (um cliente malicioso poderia
-    /// mandar o SolicitanteId de outra pessoa e se autorizar): carrega o Chamado via
-    /// ObterChamadoQuery primeiro para descobrir o SolicitanteId real do agregado, e só então
-    /// monta o Command. Custo extra de uma leitura, aceito pela mesma razão que
-    /// ObterChamadoQueryHandler já teria barrado um não-solicitante tentando espiar o chamado.
+    /// POST /api/v1/chamados/{id}/fechar — FecharChamadoCommand. Quem pode fechar (solicitante do
+    /// chamado ou ator de sistema) é conferido no pipeline contra o estado persistido
+    /// (A3 de achados.md); o controller não lê o chamado antes.
     /// </summary>
     [HttpPost("{id:guid}/fechar")]
     [Authorize]
@@ -235,13 +226,7 @@ public sealed class ChamadosController : ControllerBase
             return IdempotencyKeyAusente();
         }
 
-        var chamado = await _sender.Send(new ObterChamadoQuery(id), cancellationToken);
-        if (chamado.IsFailure)
-        {
-            return chamado.ToActionResult();
-        }
-
-        var command = new FecharChamadoCommand(id, chamado.Value!.SolicitanteId, idempotencyKey);
+        var command = new FecharChamadoCommand(id, idempotencyKey);
 
         var resultado = await _sender.Send(command, cancellationToken);
 
@@ -249,8 +234,8 @@ public sealed class ChamadosController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/v1/chamados/{id}/reabrir — ReabrirChamadoCommand. Mesma decisão de FecharAsync:
-    /// SolicitanteId nunca vem do cliente, sempre resolvido a partir do Chamado carregado.
+    /// POST /api/v1/chamados/{id}/reabrir — ReabrirChamadoCommand. Mesma regra de FecharAsync, só
+    /// para o solicitante.
     /// </summary>
     [HttpPost("{id:guid}/reabrir")]
     [Authorize]
@@ -264,33 +249,16 @@ public sealed class ChamadosController : ControllerBase
             return IdempotencyKeyAusente();
         }
 
-        var chamado = await _sender.Send(new ObterChamadoQuery(id), cancellationToken);
-        if (chamado.IsFailure)
-        {
-            return chamado.ToActionResult();
-        }
-
-        var command = new ReabrirChamadoCommand(id, chamado.Value!.SolicitanteId, idempotencyKey);
+        var command = new ReabrirChamadoCommand(id, idempotencyKey);
 
         var resultado = await _sender.Send(command, cancellationToken);
 
         return resultado.ToActionResult();
     }
 
-    /// <summary>
-    /// SolicitanteId resolvido de ICurrentUser via HttpContext.User (claims), nunca do corpo da
-    /// requisição (arquitetura/11-autenticacao-e-sessao.md). [Authorize] garante
-    /// HttpContext.User autenticado antes desta property ser lida.
-    /// </summary>
-    private Guid SolicitanteIdAtual =>
-        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
-            ? id
-            : Guid.Empty;
-
-    private ObjectResult IdempotencyKeyAusente() => Problem(
-        title: "Cabeçalho Idempotency-Key ausente",
-        detail: "Esta operação exige o cabeçalho Idempotency-Key (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md).",
-        statusCode: StatusCodes.Status400BadRequest);
+    private static ProblemResult IdempotencyKeyAusente() => new(HttpErrors.MissingHeader(
+        "Idempotency-Key",
+        "Esta operação exige o cabeçalho Idempotency-Key (arquitetura/06-contrato-erro-http-idempotencia-e-concorrencia.md)."));
 
     private static bool TentarDecodificarRowVersion(string ifMatch, out byte[] rowVersion)
     {

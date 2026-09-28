@@ -7,7 +7,7 @@ namespace Chamados.Infrastructure;
 /// <summary>
 /// Implementação real de IEquipeDoUsuarioResolver (Chamados.Application), despachando
 /// ResolverEquipeDoTecnicoQuery via ISender contra Catalogo.Contracts — mesmo mecanismo
-/// sancionado de leitura cross-módulo de EquipeMembershipChecker (arquitetura/04). Consultada
+/// sancionado de leitura cross-módulo de ChamadoAuthorizationContext (arquitetura/04). Consultada
 /// por FilaDaEquipeQueryHandler para resolver a equipe do técnico/supervisor autenticado.
 /// </summary>
 internal sealed class EquipeDoUsuarioResolver : IEquipeDoUsuarioResolver

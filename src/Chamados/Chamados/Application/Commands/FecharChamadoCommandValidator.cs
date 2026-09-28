@@ -12,7 +12,6 @@ internal sealed class FecharChamadoCommandValidator : AbstractValidator<FecharCh
     public FecharChamadoCommandValidator()
     {
         RuleFor(c => c.ChamadoId).NotEmpty();
-        RuleFor(c => c.SolicitanteId).NotEmpty();
         RuleFor(c => c.IdempotencyKey).NotEmpty();
     }
 }

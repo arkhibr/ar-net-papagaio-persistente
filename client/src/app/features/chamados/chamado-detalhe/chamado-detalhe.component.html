@@ -25,8 +25,12 @@
           <dd>{{ c.prazoSla | date: 'dd/MM/yyyy HH:mm' }}</dd>
         </div>
         <div class="campo">
+          <dt>Solicitante</dt>
+          <dd>{{ diretorio.nome(c.solicitanteId) }}</dd>
+        </div>
+        <div class="campo">
           <dt>Técnico atribuído</dt>
-          <dd>{{ c.tecnicoAtribuidoId ?? '—' }}</dd>
+          <dd>{{ diretorio.nome(c.tecnicoAtribuidoId) }}</dd>
         </div>
       </dl>
 
@@ -40,22 +44,22 @@
 
     <div class="acoes">
       @if (podeAtribuir()) {
-        <button mat-raised-button color="primary" (click)="atribuir()">Atribuir a mim</button>
+        <button mat-raised-button color="primary" [disabled]="emAndamento()" (click)="atribuir()">Atribuir a mim</button>
       }
       @if (podeDevolver()) {
-        <button mat-stroked-button (click)="devolver()">Devolver à fila</button>
+        <button mat-stroked-button [disabled]="emAndamento()" (click)="devolver()">Devolver à fila</button>
       }
       @if (podeReclassificar()) {
-        <button mat-stroked-button (click)="reclassificar()">Reclassificar</button>
+        <button mat-stroked-button [disabled]="emAndamento()" (click)="reclassificar()">Reclassificar</button>
       }
       @if (podeResolver()) {
-        <button mat-raised-button color="primary" (click)="resolver()">Resolver</button>
+        <button mat-raised-button color="primary" [disabled]="emAndamento()" (click)="resolver()">Resolver</button>
       }
       @if (podeFechar()) {
-        <button mat-stroked-button (click)="fechar()">Fechar</button>
+        <button mat-stroked-button [disabled]="emAndamento()" (click)="fechar()">Fechar</button>
       }
       @if (podeReabrir()) {
-        <button mat-stroked-button (click)="reabrir()">
+        <button mat-stroked-button [disabled]="emAndamento()" (click)="reabrir()">
           Reabrir
           @if (!dentroDoPrazoDeReabertura()) {
             <span class="aviso"> (prazo de 5 dias já passou — o servidor decide)</span>

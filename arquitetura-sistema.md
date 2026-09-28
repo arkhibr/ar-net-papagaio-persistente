@@ -49,7 +49,7 @@ Conforme `17-bff-angular-e-comunicacao.md`:
 
 ## BFF
 
-Módulo único assumido; pelo mesmo critério de `01-estrutura-de-projetos-monolito-modular.md`, o BFF adota a Topologia A de `17-bff-angular-e-comunicacao.md`: o próprio projeto `Api` cumpre o papel de BFF (termina o fluxo de autenticação, guarda token só no servidor, expõe sessão via cookie, medeia CSRF) e é o composition root do backend, sem proxy reverso nem processo separado.
+Módulo único assumido; pelo mesmo critério de `01-estrutura-de-projetos-monolito-modular.md`, o BFF adota a Topologia A de `17-bff-angular-e-comunicacao.md`: o próprio projeto `Api` cumpre o papel de BFF (termina o fluxo de autenticação, guarda token só no servidor, expõe sessão via cookie, medeia CSRF) e é o composition root do backend, sem processo separado. Em produção, um proxy reverso fica na frente (decisão D4 de `adaptacao-bff-angular.md`): serve os estáticos do Angular e repassa `/api` e `/auth` para a Api na mesma origem. Ele não assume nenhuma parte do papel de BFF (sessão, CSRF e autenticação continuam na Api).
 
 Justificativa de não forçar a Topologia B (BFF fisicamente separado): o backend inteiro é um único monólito modular, sem outro deployable e sem outro canal/cliente além deste Angular. Introduzir BFF separado adicionaria HTTP interno, autenticação entre serviços e mais um deployable sem ganho correspondente, exatamente o custo que `04-comunicacao-entre-modulos.md` evita para comunicação _dentro_ do monólito.
 
@@ -172,8 +172,18 @@ Infrastructure.Legacy (ou equivalente)
 
 ## Lacunas e decisões pendentes desta visão de topologia
 
-1. **Qual IdP concreto** autentica o usuário: não especificado; necessário antes de `persistencia-e-integracao` desenhar `ExternalIdentity`/`AuthSession` em detalhe.
-2. **Quantas réplicas do processo** são esperadas em produção: determina se a chave de Data Protection e a sessão externalizada (`10`) são requisito desde o dia um ou podem ficar mais simples enquanto houver só uma réplica.
+1. **Qual IdP concreto** autentica o usuário: **resolvido de forma provisória** (decisão D1 de `adaptacao-bff-angular.md`). Enquanto o IdP não é escolhido, o BFF autentica com um provedor local de credenciais (página `/auth/login` no backend, B10), tratado como mais um provedor externo (`ExternalIdentity` com `Provider = "local"`). `ExternalIdentity` e `AuthSession` já existem no `BffDbContext`. **A escolha do IdP continua em aberto**; quando acontecer, entra como mais um provedor (B9) e o Angular não muda.
+2. **Quantas réplicas do processo** são esperadas em produção: continua sem número, mas deixou de bloquear. A sessão server-side e as chaves de Data Protection já ficam em banco relacional (decisão D3), então mais de uma réplica funciona desde o dia um.
+
+Decisões tomadas para o BFF (`adaptacao-bff-angular.md`, seção 2):
+
+| # | Decisão | Escolha |
+|---|---|---|
+| D1 | IdP e protocolo | Provisório: provedor local de credenciais no BFF (B10). IdP definitivo em aberto |
+| D2 | De onde vêm os papéis | Tabela interna `UsuarioPapeis`, resolvida a cada requisição |
+| D3 | Store da sessão e das chaves de Data Protection | Banco relacional (`BffDbContext`) |
+| D4 | Como o SPA é servido em produção | Proxy reverso na frente, roteando `/` para os estáticos e `/api`, `/auth` para a Api. A Api não serve o build |
+| D5 | Login de desenvolvimento | `/dev/login` só em Development, como atalho dentro da página de login do backend |
 3. Pendências específicas de regra de negócio da funcionalidade que originou este documento continuam valendo e não são repetidas aqui.
 
 ## Referências

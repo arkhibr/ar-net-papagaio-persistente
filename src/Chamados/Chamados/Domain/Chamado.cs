@@ -1,5 +1,6 @@
 using Chamados.Contracts;
 using SharedKernel;
+using SharedKernel.Domain;
 
 namespace Chamados.Domain;
 
@@ -10,7 +11,7 @@ namespace Chamados.Domain;
 /// (isso é Application, ver plano-de-arquitetura.md secao 2 e arquitetura/02-dominio-hibrido.md).
 /// internal: única superfície pública do módulo é Chamados.Contracts (arquitetura/01).
 /// </summary>
-internal sealed class Chamado
+internal sealed class Chamado : AggregateRoot
 {
     public Guid Id { get; }
     public Guid SolicitanteId { get; }
@@ -65,7 +66,7 @@ internal sealed class Chamado
     {
         var prazoSla = agora.AddHours(horasDeSla);
 
-        return new Chamado(
+        var chamado = new Chamado(
             Guid.NewGuid(),
             solicitanteId,
             categoriaId,
@@ -73,6 +74,10 @@ internal sealed class Chamado
             prioridade,
             agora,
             prazoSla);
+
+        chamado.Raise(new ChamadoAberto(chamado.Id, prioridade, prazoSla));
+
+        return chamado;
     }
 
     /// <summary>Autoatribuição: técnico da equipe responsável pega o chamado da fila. Aberto -> EmAtendimento.</summary>
@@ -82,14 +87,20 @@ internal sealed class Chamado
 
         Status = StatusChamado.EmAtendimento;
         TecnicoAtribuidoId = tecnicoId;
+
+        Raise(new ChamadoAtribuido(Id, tecnicoId));
     }
 
-    /// <summary>Técnico atribuído devolve o chamado à fila. EmAtendimento -> Aberto.</summary>
+    /// <summary>
+    /// Técnico atribuído devolve o chamado à fila. EmAtendimento -> Aberto, sem técnico: o
+    /// vínculo do técnico que devolveu deixa de existir (A2 de achados.md).
+    /// </summary>
     public void Devolver()
     {
         GarantirStatus(StatusChamado.EmAtendimento, nameof(Devolver));
 
         Status = StatusChamado.Aberto;
+        TecnicoAtribuidoId = null;
     }
 
     /// <summary>
@@ -123,6 +134,8 @@ internal sealed class Chamado
         Status = StatusChamado.Resolvido;
         NotaResolucao = notaResolucao;
         ResolvidoEm = agora;
+
+        Raise(new ChamadoResolvido(Id, notaResolucao));
     }
 
     /// <summary>Fecha o chamado. Só a partir de Resolvido.</summary>
@@ -134,7 +147,10 @@ internal sealed class Chamado
         FechadoEm = agora;
     }
 
-    /// <summary>Reabre o chamado. Só a partir de Fechado, e só dentro de 5 dias corridos do fechamento.</summary>
+    /// <summary>
+    /// Reabre o chamado. Só a partir de Fechado, e só dentro de 5 dias corridos do fechamento.
+    /// O chamado volta para a fila da equipe sem técnico atribuído (A2 de achados.md).
+    /// </summary>
     public void Reabrir(DateTimeOffset agora)
     {
         GarantirStatus(StatusChamado.Fechado, nameof(Reabrir));
@@ -147,6 +163,7 @@ internal sealed class Chamado
         }
 
         Status = StatusChamado.Aberto;
+        TecnicoAtribuidoId = null;
     }
 
     /// <summary>Marca o chamado como escalonado (flag + data). Só válido em Aberto ou EmAtendimento.</summary>
@@ -158,8 +175,12 @@ internal sealed class Chamado
                 $"Não é possível escalonar um chamado no status {Status}.");
         }
 
+        var escalonadoAntesEm = DataEscalonamento;
+
         Escalonado = true;
         DataEscalonamento = agora;
+
+        Raise(new ChamadoEscalonado(Id, escalonadoAntesEm, agora));
     }
 
     private void GarantirStatus(StatusChamado statusEsperado, string acao)

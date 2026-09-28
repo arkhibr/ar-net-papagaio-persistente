@@ -2,8 +2,8 @@ using Mediator;
 using Microsoft.Extensions.DependencyInjection;
 
 // Handlers deste módulo dependem de serviços Scoped (ChamadosDbContext via IChamadoRepository,
-// ICurrentUser, IUnitOfWork, IIdempotencyStore, IEquipeMembershipChecker/IEquipeDoUsuarioResolver,
-// IAuthorizationContext — todos registrados AddScoped em ChamadosDependencyInjection). O default
+// ICurrentUser, IUnitOfWork, IIdempotencyStore, IEquipeDoUsuarioResolver,
+// IChamadosAuthorizationContext — todos Scoped, keyed ou não, em ChamadosDependencyInjection). O default
 // do Mediator.SourceGenerator é ServiceLifetime.Singleton (melhor throughput quando não há
 // dependência Scoped) — errado aqui: um handler Singleton prendendo uma dependência Scoped no
 // construtor (captive dependency) resolveria sempre a MESMA instância de ChamadosDbContext/

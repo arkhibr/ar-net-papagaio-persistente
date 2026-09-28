@@ -39,6 +39,13 @@ internal sealed class AbrirChamadoCommandHandler : IRequestHandler<AbrirChamadoC
             return Result<Guid>.Failure(resolucao.Error!);
         }
 
+        // Categoria inativa não aceita chamado novo (a reclassificação de um chamado existente
+        // continua aceitando: B6 de achados.md, a categoria nunca é apagada).
+        if (!resolucao.Value!.CategoriaAtiva)
+        {
+            return Result<Guid>.Failure("A categoria de serviço está inativa e não aceita novos chamados.");
+        }
+
         var agora = _timeProvider.GetUtcNow();
 
         var chamado = Chamado.Abrir(

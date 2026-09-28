@@ -9,6 +9,7 @@ import { CatalogoApiService } from '../../../core/services/catalogo-api.service'
 import { CategoriaDeServicoDto } from '../../../core/models/catalogo.model';
 import { PrioridadeChamado } from '../../../core/models/chamado.model';
 import { ProblemDetails } from '../../../core/models/problem-details.model';
+import { ChaveDeIdempotencia } from '../../../core/http/chave-de-idempotencia';
 
 const OPCOES_PRIORIDADE = [
   { valor: PrioridadeChamado.Baixa, rotulo: 'Baixa' },
@@ -35,6 +36,9 @@ export class AbrirChamadoComponent implements OnInit {
   readonly enviando = signal(false);
   readonly erroGeral = signal<string | null>(null);
 
+  /** Criada ao abrir o formulário; reutilizada em nova tentativa com o mesmo conteúdo (F6). */
+  private readonly chave = new ChaveDeIdempotencia();
+
   readonly form = this.fb.nonNullable.group({
     categoriaId: ['', Validators.required],
     prioridade: [PrioridadeChamado.Media, Validators.required],
@@ -45,14 +49,17 @@ export class AbrirChamadoComponent implements OnInit {
   }
 
   enviar(): void {
-    if (this.form.invalid) {
+    if (this.form.invalid || this.enviando()) {
       return;
     }
     this.erroGeral.set(null);
     this.enviando.set(true);
     const { categoriaId, prioridade } = this.form.getRawValue();
-    this.chamadosApi.abrir(categoriaId, prioridade).subscribe({
-      next: ({ id }) => this.router.navigate(['/chamados', id]),
+    this.chamadosApi.abrir(categoriaId, prioridade, this.chave.para({ categoriaId, prioridade })).subscribe({
+      next: ({ id }) => {
+        this.chave.concluir();
+        this.router.navigate(['/chamados', id]);
+      },
       error: (problema: ProblemDetails) => {
         this.enviando.set(false);
         this.erroGeral.set(

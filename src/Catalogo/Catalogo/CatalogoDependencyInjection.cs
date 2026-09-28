@@ -1,10 +1,12 @@
 using Catalogo.Application;
 using Catalogo.Infrastructure;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SharedKernel;
+using SharedKernel.Modules;
 
 namespace Catalogo;
 
@@ -23,35 +25,14 @@ namespace Catalogo;
 /// gerar ServiceDescriptor para tipos internal do PRÓPRIO assembly; a Api nunca referencia
 /// Mediator.SourceGenerator). Lifetime Scoped (AssemblyInfo.cs).
 ///
-/// Nota sobre IUnitOfWork (api-e-composicao, colisão de DI resolvida nesta rodada):
-/// IUnitOfWork (SharedKernel) é uma porta única, mas Chamados e Catalogo têm implementações
-/// concretas distintas (ChamadosUnitOfWork, CatalogoUnitOfWork), cada uma commitando no
-/// próprio DbContext do módulo. Se a composição raiz (Api) registrar os dois módulos no mesmo
-/// IServiceCollection e cada um chamar AddScoped&lt;IUnitOfWork, X&gt;() simples, o último
-/// registro vence silenciosamente — errado, porque UnitOfWorkBehavior (SharedKernel.Messaging)
-/// resolveria sempre a implementação do módulo registrado por último, não a do módulo dono do
-/// Command em execução.
-///
-/// Catalogo não tem, hoje, nenhum Command transacional (só Queries, plano-de-arquitetura.md
-/// secao 5 — nenhum Command aparece para Catalogo), então a colisão não é um problema real
-/// ainda: não registrar IUnitOfWork aqui não quebra nada, porque UnitOfWorkBehavior só roda
-/// para TMessage : ITransactionalCommand, e Catalogo não expõe nenhum. Por isso o registro de
-/// IUnitOfWork foi removido deste método — mesma disciplina de não adicionar
-/// abstração/registro para caso hipotético já seguida nesta solution (ex.: Catalogo permanece
-/// anêmico até ter sinal real de promoção, arquitetura/01/plano-de-arquitetura.md secao 2).
-///
-/// Volta a ser um problema real no dia em que Catalogo ganhar seu primeiro Command transacional
-/// (ex.: cadastro de CategoriaDeServico/MembroDeEquipe). Solução futura mais provável, não
-/// implementada agora por não haver consumidor: registrar cada IUnitOfWork por
-/// AddKeyedScoped&lt;IUnitOfWork&gt;(nomeDoModulo, ...) e o UnitOfWorkBehavior resolver a chave
-/// certa a partir do assembly de TMessage (via IServiceProvider/reflexão) — mecanismo novo, só
-/// justificado quando existir um segundo módulo com Command real disputando o mesmo tipo.
-/// CatalogoUnitOfWork (Infrastructure) continua existindo e implementada, só não registrada
-/// aqui: reativar o registro (com a chave, quando keyed services existir) é o primeiro passo
-/// dessa migração futura.
+/// IUnitOfWork (e as demais portas do SharedKernel) é registrado keyed pela chave do módulo:
+/// o UnitOfWorkBehavior resolve o do módulo dono do Command pelo assembly da mensagem, então
+/// Chamados e Catalogo nunca disputam o mesmo registro (P1 de achados.md).
 /// </summary>
 public static class CatalogoDependencyInjection
 {
+    internal const string ModuleKey = "Catalogo";
+
     public static IServiceCollection AddCatalogoModule(
         this IServiceCollection services, IConfiguration configuration)
     {
@@ -60,12 +41,19 @@ public static class CatalogoDependencyInjection
         // em Chamados/ChamadosDependencyInjection.cs) — chamada sem argumento.
         services.AddMediator();
 
-        // Registro por CHAVE, mesma razão documentada em ChamadosDependencyInjection.cs: o
-        // Mediator.Mediator gerado por Catalogo só despacha os tipos que este assembly viu na
-        // própria geração; a Api monta um ISender composto (Api/Infrastructure/CompositeSender.cs)
-        // que roteia por esta chave.
+        // Rota e portas por módulo (P1/M11 de achados.md): mesma disciplina de
+        // ChamadosDependencyInjection. Os Commands de administração do Catálogo não usam
+        // Idempotency-Key, então o módulo não registra IIdempotencyStore; o primeiro Command que
+        // precisar dele falha alto no ModuleService em vez de usar a porta de outro módulo. O
+        // IAuthorizationContext existe para a autorização por papel das mensagens de administração.
+        services.AddModuleRoute(
+            ModuleKey, typeof(Contracts.CategoriasDeServicoQuery).Assembly, typeof(CatalogoDependencyInjection).Assembly);
         services.AddKeyedScoped<global::Mediator.IMediator>(
-            ModuleSenderKeys.Catalogo, (sp, _) => sp.GetRequiredService<global::Mediator.Mediator>());
+            ModuleKey, (sp, _) => sp.GetRequiredService<global::Mediator.Mediator>());
+        services.AddKeyedScoped<IUnitOfWork, CatalogoUnitOfWork>(ModuleKey);
+        services.AddKeyedScoped<IAuthorizationContext, CatalogoAuthorizationContext>(ModuleKey);
+
+        services.AddValidatorsFromAssembly(typeof(CatalogoDependencyInjection).Assembly, includeInternalTypes: true);
 
         services
             .AddOptions<CatalogoOptions>()
@@ -81,6 +69,7 @@ public static class CatalogoDependencyInjection
 
         services.AddScoped<ICategoriaDeServicoRepository, CategoriaDeServicoRepository>();
         services.AddScoped<IMembroDeEquipeRepository, MembroDeEquipeRepository>();
+        services.AddScoped<IEquipeRepository, EquipeRepository>();
         services.AddScoped<IDatabaseInitializer, CatalogoDatabaseInitializer>();
 
         // Cada camada registra a própria checagem, a Api só agrega em /health

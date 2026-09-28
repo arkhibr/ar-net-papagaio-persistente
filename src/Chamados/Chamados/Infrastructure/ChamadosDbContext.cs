@@ -11,12 +11,10 @@ namespace Chamados.Infrastructure;
 /// e arquitetura/01. internal: Chamados permanece 2 projetos, Infrastructure fundida no mesmo
 /// assembly (arquitetura/01).
 ///
-/// Nota de escopo (não implementado nesta rodada, persistencia-e-integracao): interceptor de
-/// auditoria (IAuditable -> registro na mesma transação, arquitetura/21-auditoria.md) e
-/// interceptor/coleta de eventos de domínio pós-commit (IDomainEventDispatcher,
-/// arquitetura/25-transacao-e-unit-of-work.md) não foram pedidos nesta rodada e Chamado.cs
-/// (Domain) ainda não acumula eventos de domínio — ficam como pendência registrada, não
-/// inventados aqui.
+/// Tabelas técnicas do módulo: ChamadosIdempotencyRecords e ChamadosRegistrosAuditoria
+/// (auditoria materializada por ChamadosUnitOfWork a partir dos eventos de domínio,
+/// arquitetura/21). O dispatch pós-commit de eventos de domínio (IDomainEventDispatcher,
+/// arquitetura/25) ainda não existe.
 /// </summary>
 internal sealed class ChamadosDbContext : DbContext
 {
@@ -27,6 +25,8 @@ internal sealed class ChamadosDbContext : DbContext
     public DbSet<Chamado> Chamados => Set<Chamado>();
 
     public DbSet<IdempotencyRecordEntity> IdempotencyRecords => Set<IdempotencyRecordEntity>();
+
+    public DbSet<RegistroAuditoriaEntity> RegistrosAuditoria => Set<RegistroAuditoriaEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

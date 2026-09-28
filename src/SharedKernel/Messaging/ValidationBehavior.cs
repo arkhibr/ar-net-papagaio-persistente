@@ -47,7 +47,7 @@ public sealed class ValidationBehavior<TMessage, TResponse> : IPipelineBehavior<
         if (falhas.Count > 0)
         {
             var erros = falhas
-                .Select(falha => new ValidationError(falha.PropertyName, falha.ErrorMessage))
+                .Select(falha => new ValidationError(falha.PropertyName, falha.ErrorMessage, falha.ErrorCode))
                 .ToList();
 
             // Qualificado explicitamente: FluentValidation também declara um ValidationException

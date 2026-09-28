@@ -1,11 +1,13 @@
 using Chamados.Application;
 using Chamados.Infrastructure;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SharedKernel;
 using SharedKernel.Messaging;
+using SharedKernel.Modules;
 
 namespace Chamados;
 
@@ -27,15 +29,11 @@ namespace Chamados;
 /// os handlers dependem de serviços Scoped (repositórios, ICurrentUser), então o default
 /// Singleton do gerador causaria captive dependency.
 ///
-/// Nota de escopo: IAuthorizationContext é porta de SharedKernel (não de Chamados.Application),
-/// mas a implementação real (ChamadoAuthorizationContext) é específica deste módulo — por
-/// isso é registrada aqui, na composição do módulo Chamados, e não em algum lugar
-/// "compartilhado". Se um segundo módulo precisar de IAuthorizationContext no futuro, cada um
-/// registra a própria implementação (o container de DI resolve por Scoped normalmente dentro
-/// do próprio módulo que a consome).
 /// </summary>
 public static class ChamadosDependencyInjection
 {
+    internal const string ModuleKey = "Chamados";
+
     public static IServiceCollection AddChamadosModule(
         this IServiceCollection services, IConfiguration configuration)
     {
@@ -47,20 +45,22 @@ public static class ChamadosDependencyInjection
         // assembly E delegate aqui), por isso a chamada abaixo é sem argumento.
         services.AddMediator();
 
-        // Registro adicional por CHAVE (api-e-composicao, problema real encontrado montando a
-        // Api): o Mediator.Mediator gerado por este assembly só sabe despachar (switch
-        // compile-time) os tipos de Command/Query que ESTE assembly viu durante a própria
-        // geração (Chamados.Contracts + o que Chamados despacha de Catalogo.Contracts). Quando
-        // a Api compõe os dois módulos no mesmo IServiceCollection, o ISender/IMediator "sem
-        // chave" (services.TryAdd) fica só com o Mediator do módulo cujo AddMediator() rodou
-        // primeiro — o outro módulo nunca teria seu ISender resolvido, mesmo com os handlers
-        // dele presentes no container (o Mediator errado lançaria InvalidMessageException para
-        // qualquer tipo que não é "seu"). Cada módulo expõe o próprio IMediator por uma chave
-        // estável (nome do módulo) para a Api montar um ISender composto (Api/Infrastructure/
-        // CompositeSender.cs) que roteia pelo assembly do tipo da mensagem — sem isso, um dos
-        // dois módulos ficaria inacessível via ISender assim que o outro também fosse composto.
+        // Rota e portas por módulo (P1/M11 de achados.md): o módulo declara os próprios
+        // assemblies e registra IMediator, IUnitOfWork, IIdempotencyStore e IAuthorizationContext
+        // keyed pela própria chave. Nada daqui é registrado sem chave, então um segundo módulo com
+        // escrita nunca herda o DbContext deste. O ISender composto da Api e os behaviors do
+        // SharedKernel resolvem a implementação pelo assembly da mensagem.
+        services.AddModuleRoute(
+            ModuleKey, typeof(Contracts.AbrirChamadoCommand).Assembly, typeof(ChamadosDependencyInjection).Assembly);
         services.AddKeyedScoped<global::Mediator.IMediator>(
-            ModuleSenderKeys.Chamados, (sp, _) => sp.GetRequiredService<global::Mediator.Mediator>());
+            ModuleKey, (sp, _) => sp.GetRequiredService<global::Mediator.Mediator>());
+        services.AddKeyedScoped<IUnitOfWork, ChamadosUnitOfWork>(ModuleKey);
+        services.AddKeyedScoped<IIdempotencyStore, IdempotencyStore>(ModuleKey);
+        services.AddKeyedScoped<IAuthorizationContext, ChamadoAuthorizationContext>(ModuleKey);
+
+        // Validação sintática (arquitetura/16): sem este registro o ValidationBehavior recebe uma
+        // lista vazia e nunca valida nada (C3 de achados.md).
+        services.AddValidatorsFromAssembly(typeof(ChamadosDependencyInjection).Assembly, includeInternalTypes: true);
 
         services
             .AddOptions<ChamadosOptions>()
@@ -76,11 +76,8 @@ public static class ChamadosDependencyInjection
         });
 
         services.AddScoped<IChamadoRepository, ChamadoRepository>();
-        services.AddScoped<IUnitOfWork, ChamadosUnitOfWork>();
-        services.AddScoped<IIdempotencyStore, IdempotencyStore>();
-        services.AddScoped<IEquipeMembershipChecker, EquipeMembershipChecker>();
+        services.AddScoped<IChamadoLeitura, ChamadoLeitura>();
         services.AddScoped<IEquipeDoUsuarioResolver, EquipeDoUsuarioResolver>();
-        services.AddScoped<IAuthorizationContext, ChamadoAuthorizationContext>();
         services.AddScoped<IDatabaseInitializer, ChamadosDatabaseInitializer>();
 
         // Cada camada registra a própria checagem, a Api só agrega em /health

@@ -5,6 +5,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ChamadosApiService } from '../../../core/services/chamados-api.service';
+import { DiretorioDeUsuariosService } from '../../../core/services/diretorio-de-usuarios.service';
 import { ChamadoResumoDto } from '../../../core/models/chamado.model';
 import { StatusChamadoBadgeComponent } from '../../../shared/components/status-chamado-badge/status-chamado-badge.component';
 import { PrioridadeBadgeComponent } from '../../../shared/components/prioridade-badge/prioridade-badge.component';
@@ -25,6 +26,7 @@ import { PrioridadeBadgeComponent } from '../../../shared/components/prioridade-
 })
 export class FilaComponent implements OnInit {
   private readonly chamadosApi = inject(ChamadosApiService);
+  protected readonly diretorio = inject(DiretorioDeUsuariosService);
   private readonly router = inject(Router);
 
   readonly colunas = ['prioridade', 'status', 'abertoEm', 'prazoSla', 'tecnicoAtribuidoId'];
@@ -43,6 +45,7 @@ export class FilaComponent implements OnInit {
     this.chamadosApi.filaDaEquipe(this.page(), this.pageSize()).subscribe({
       next: (resposta) => {
         this.itens.set(resposta.items);
+        this.diretorio.resolver(resposta.items.map((c) => c.tecnicoAtribuidoId));
         this.totalItems.set(resposta.totalItems);
         this.carregando.set(false);
       },

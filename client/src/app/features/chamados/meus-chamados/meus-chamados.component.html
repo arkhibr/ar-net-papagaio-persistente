@@ -23,7 +23,7 @@
       </ng-container>
       <ng-container matColumnDef="tecnicoAtribuidoId">
         <th mat-header-cell *matHeaderCellDef>Técnico</th>
-        <td mat-cell *matCellDef="let c">{{ c.tecnicoAtribuidoId ?? '—' }}</td>
+        <td mat-cell *matCellDef="let c">{{ diretorio.nome(c.tecnicoAtribuidoId) }}</td>
       </ng-container>
       <tr mat-header-row *matHeaderRowDef="colunas"></tr>
       <tr mat-row *matRowDef="let row; columns: colunas" (click)="abrirDetalhe(row)" class="linha-clicavel"></tr>

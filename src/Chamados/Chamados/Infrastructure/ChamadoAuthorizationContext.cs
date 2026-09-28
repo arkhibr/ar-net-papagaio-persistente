@@ -2,40 +2,20 @@ using Catalogo.Contracts;
 using Chamados.Contracts;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
-using SharedKernel;
 
 namespace Chamados.Infrastructure;
 
 /// <summary>
-/// Implementação real de IAuthorizationContext (SharedKernel) para o módulo Chamados.
-/// Consultada pelo AuthorizationBehavior (SharedKernel) a partir de
-/// AtribuirChamadoCommand/DevolverChamadoCommand/ResolverChamadoCommand.IsAuthorizedAsync,
-/// todos chamando HasResourceLinkAsync(currentUser.UserId, ChamadoId, ...) com o mesmo
-/// método, mas cada Command aplicando um sentido diferente de "vínculo" ao resultado — por
-/// isso a implementação precisa cobrir os dois sentidos numa única resposta coerente:
-///
-/// - DevolverChamadoCommand/ResolverChamadoCommand: "vínculo" = usuário é o técnico
-///   atualmente atribuído ao chamado (só possível quando o chamado já está EmAtendimento —
-///   estado que o próprio agregado exige depois, então o segundo braço abaixo nunca se aplica
-///   nestes dois casos).
-/// - AtribuirChamadoCommand: "vínculo" = chamado ainda está Aberto (ninguém atribuído) e o
-///   usuário é membro da equipe responsável pelo chamado (checagem que atravessa
-///   Catalogo.Contracts, dado do módulo Catalogo — plano-de-arquitetura.md secao 5, nota;
-///   arquitetura/04-comunicacao-entre-modulos.md, nunca acesso direto ao schema de Catalogo).
-///
-/// A união dos dois braços (TecnicoAtribuidoId == userId) OR (Status == Aberto AND membro da
-/// equipe) responde corretamente às duas perguntas com a mesma assinatura, porque cada Command
-/// só é despachado num estado em que só um dos dois braços pode ser verdadeiro (autorização
-/// ainda roda antes do handler carregar/validar o estado do agregado, mas os dois braços não
-/// se sobrepõem na prática: Atribuir exige Aberto pelo próprio invariante do agregado,
-/// Devolver/Resolver exigem EmAtendimento).
-///
-/// Leitura não rastreada: só consulta, nunca altera o Chamado (arquitetura/27).
+/// Implementação de IChamadosAuthorizationContext: perguntas de vínculo ator-chamado, uma por
+/// intenção (M10 de achados.md). Lê só a projeção necessária do chamado (sem rastreamento,
+/// arquitetura/27), uma vez por chamado por requisição, e consulta o vínculo técnico-equipe no
+/// Catálogo via Catalogo.Contracts (arquitetura/04).
 /// </summary>
-internal sealed class ChamadoAuthorizationContext : IAuthorizationContext
+internal sealed class ChamadoAuthorizationContext : IChamadosAuthorizationContext
 {
     private readonly ChamadosDbContext _dbContext;
     private readonly ISender _sender;
+    private readonly Dictionary<Guid, VinculosDoChamado?> _lidos = new();
 
     public ChamadoAuthorizationContext(ChamadosDbContext dbContext, ISender sender)
     {
@@ -43,32 +23,49 @@ internal sealed class ChamadoAuthorizationContext : IAuthorizationContext
         _sender = sender;
     }
 
-    public async Task<bool> HasResourceLinkAsync(Guid userId, Guid resourceId, CancellationToken cancellationToken)
+    public async Task<bool> EhSolicitanteAsync(Guid userId, Guid chamadoId, CancellationToken cancellationToken) =>
+        (await LerAsync(chamadoId, cancellationToken))?.SolicitanteId == userId;
+
+    public async Task<bool> EhTecnicoAtribuidoAsync(Guid userId, Guid chamadoId, CancellationToken cancellationToken) =>
+        (await LerAsync(chamadoId, cancellationToken))?.TecnicoAtribuidoId == userId;
+
+    public async Task<bool> EhMembroDaEquipeResponsavelAsync(Guid userId, Guid chamadoId, CancellationToken cancellationToken)
     {
-        var chamado = await _dbContext.Chamados
-            .AsNoTracking()
-            .Where(c => c.Id == resourceId)
-            .Select(c => new { c.Status, c.EquipeId, c.TecnicoAtribuidoId })
-            .FirstOrDefaultAsync(cancellationToken);
+        var chamado = await LerAsync(chamadoId, cancellationToken);
 
-        if (chamado is null)
-        {
-            return false;
-        }
-
-        if (chamado.TecnicoAtribuidoId == userId)
-        {
-            return true;
-        }
-
-        if (chamado.Status != StatusChamado.Aberto)
-        {
-            return false;
-        }
-
-        var resultado = await _sender.Send(
-            new EhMembroDaEquipeQuery(userId, chamado.EquipeId), cancellationToken);
-
-        return resultado.Value;
+        return chamado is not null && await EhMembroAsync(userId, chamado.EquipeId, cancellationToken);
     }
+
+    public async Task<bool> EstaNaFilaDaEquipeDoUsuarioAsync(Guid userId, Guid chamadoId, CancellationToken cancellationToken)
+    {
+        var chamado = await LerAsync(chamadoId, cancellationToken);
+
+        return chamado is { Status: StatusChamado.Aberto }
+            && await EhMembroAsync(userId, chamado.EquipeId, cancellationToken);
+    }
+
+    private async Task<bool> EhMembroAsync(Guid userId, Guid equipeId, CancellationToken cancellationToken)
+    {
+        var resultado = await _sender.Send(new EhMembroDaEquipeQuery(userId, equipeId), cancellationToken);
+
+        return resultado.IsSuccess && resultado.Value;
+    }
+
+    private async Task<VinculosDoChamado?> LerAsync(Guid chamadoId, CancellationToken cancellationToken)
+    {
+        if (!_lidos.TryGetValue(chamadoId, out var vinculos))
+        {
+            vinculos = await _dbContext.Chamados
+                .AsNoTracking()
+                .Where(c => c.Id == chamadoId)
+                .Select(c => new VinculosDoChamado(c.SolicitanteId, c.TecnicoAtribuidoId, c.EquipeId, c.Status))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            _lidos[chamadoId] = vinculos;
+        }
+
+        return vinculos;
+    }
+
+    private sealed record VinculosDoChamado(Guid SolicitanteId, Guid? TecnicoAtribuidoId, Guid EquipeId, StatusChamado Status);
 }

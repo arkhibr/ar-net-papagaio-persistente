@@ -1,54 +1,62 @@
 using Mediator;
+using SharedKernel.Modules;
 
 namespace SharedKernel.Messaging;
 
 /// <summary>
 /// Envelope transacional mais interno, ao redor do Handler (arquitetura/25-transacao-e-unit-of-work.md):
 /// Logging → Validation → Authorization → Idempotency → Caching → UnitOfWork → Handler. Roda
-/// só para TMessage : ITransactionalCommand (marcador novo desta rodada — ver ITransactionalCommand
-/// para o porquê de não reaproveitar IIdempotentCommand). Query nunca implementa
-/// ITransactionalCommand, então nunca passa por este behavior: leitura não tem transação de
-/// escrita nem commit.
+/// só para TMessage : ITransactionalCommand, com o IUnitOfWork do módulo dono da mensagem.
 ///
-/// Chama next() primeiro; só se a resposta for sucesso (TResponse : IResult, a mesma
-/// interface-base de Result/Result&lt;T&gt;) chama IUnitOfWork.SaveChangesAsync. Result.Failure
-/// ou qualquer exceção não capturada fazem rollback implícito (SaveChanges nunca é chamado) —
-/// não há transação explícita de banco aberta por este behavior (isso é decisão de
-/// Infrastructure/DbContext, arquitetura/25 aceita o commit implícito do SaveChanges como
-/// fronteira transacional padrão).
+/// Um único SaveChanges por Command:
+/// - sucesso: grava a mudança de negócio e, se a mensagem é idempotente, a conclusão da chave;
+/// - Result.Failure de Command idempotente: descarta o que o handler encenou e grava só a
+///   conclusão da chave (a falha determinística fica gravada para reenvios, arquitetura/06);
+/// - Result.Failure de Command não idempotente: nenhum SaveChanges;
+/// - exceção: propaga sem SaveChanges.
 ///
-/// Fora do escopo desta implementação (não implementado aqui, registrado como próximo passo):
-/// o dispatch pós-commit de eventos de domínio in-process via IDomainEventDispatcher, citado no
-/// exemplo de referência de arquitetura/25. Não existe ainda IDomainEventDispatcher nem
-/// implementação de Infrastructure para ele nesta solution — introduzi-lo é trabalho de uma
-/// rodada futura (quando um INotificationHandler reativo entre módulos precisar dele, ver
-/// arquitetura/04-comunicacao-entre-modulos.md/arquitetura/05-processamento-assincrono-e-eventos.md),
-/// não inventado agora sem consumidor real.
+/// Fora do escopo (próximo passo): dispatch pós-commit de eventos de domínio in-process
+/// (IDomainEventDispatcher, arquitetura/25). Os eventos já existem no agregado e são
+/// consumidos hoje pela auditoria, dentro do IUnitOfWork do módulo.
 /// </summary>
 public sealed class UnitOfWorkBehavior<TMessage, TResponse> : IPipelineBehavior<TMessage, TResponse>
     where TMessage : IMessage, ITransactionalCommand
     where TResponse : IResult
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly IModuleService<IUnitOfWork> _unitsOfWork;
+    private readonly PendingIdempotency _pendingIdempotency;
 
-    public UnitOfWorkBehavior(IUnitOfWork unitOfWork)
+    public UnitOfWorkBehavior(IModuleService<IUnitOfWork> unitsOfWork, PendingIdempotency pendingIdempotency)
     {
-        _unitOfWork = unitOfWork;
+        _unitsOfWork = unitsOfWork;
+        _pendingIdempotency = pendingIdempotency;
     }
 
     public async ValueTask<TResponse> Handle(
         TMessage message, MessageHandlerDelegate<TMessage, TResponse> next, CancellationToken cancellationToken)
     {
+        var unitOfWork = _unitsOfWork.For(typeof(TMessage));
         var response = await next(message, cancellationToken);
+        var idempotencia = _pendingIdempotency.For(message);
 
-        if (response.IsFailure)
+        if (idempotencia is null)
         {
-            // Rollback implícito: SaveChanges nunca é chamado para uma falha de negócio
-            // determinística (Result.Failure).
+            if (response.IsSuccess)
+            {
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
             return response;
         }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (response.IsFailure)
+        {
+            unitOfWork.DiscardChanges();
+        }
+
+        await idempotencia.StageAsync(response, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        idempotencia.MarkCommitted();
 
         return response;
     }
