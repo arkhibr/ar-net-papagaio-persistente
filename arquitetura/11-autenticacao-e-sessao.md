@@ -101,6 +101,15 @@ Ver [`10-configuracao-e-segredos.md`](10-configuracao-e-segredos.md): a chave de
 
 Um sistema concreto pode precisar integrar um IdP institucional legado via um protocolo mais antigo (ex.: WS-Federation/SAML), com evolução planejada para OIDC. A camada de mapeamento de identidade externa (`ExternalIdentity`) é exatamente o que absorve essa transição sem afetar o restante do sistema. Da mesma forma, o store de sessão e a chave de Data Protection podem viver num banco relacional já disponível em vez de Redis, quando não há justificativa operacional para introduzir uma peça de infraestrutura nova só para isso (ver [`10-configuracao-e-segredos.md`](10-configuracao-e-segredos.md)).
 
+**Provedor local de credenciais provisório.** Enquanto o IdP não está definido, um sistema pode autenticar com credencial local gerida pelo próprio BFF: login e senha, com hash PBKDF2 (`PasswordHasher<T>`), bloqueio por tentativas, rate limiting e mensagem de erro que não revela se o login existe. A divergência só é aceitável se preservar o resto da cadeia de confiança descrita acima:
+
+- O provedor local é tratado como mais um provedor externo: cada credencial tem uma `ExternalIdentity` (`Provider = "local"`) apontando para o `UserId` interno. Sessão, `AuthSession`, `SecurityVersion`, cookie e `ICurrentUser` não sabem que o provedor é local.
+- A página de login é servida pelo backend (`/auth/login`), não pelo frontend. O frontend faz o mesmo redirect de página inteira que fará com o IdP, então trocar de provedor não muda o frontend.
+- Não existe autocadastro público. Usuários são criados por um caminho administrativo.
+- Condição de saída: quando o IdP for definido, `/auth/login` passa a iniciar o fluxo do IdP, e o provedor local é desligado ou mantido só para contas explicitamente listadas (por exemplo, contas de serviço), com essa lista registrada.
+
+Adotado neste sistema; ver B10 em [`../adaptacao-bff-angular.md`](../adaptacao-bff-angular.md).
+
 ## Veja também
 
 - [`10-configuracao-e-segredos.md`](10-configuracao-e-segredos.md): onde a chave de criptografia do cookie e os segredos de autenticação vivem

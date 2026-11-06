@@ -1,0 +1,61 @@
+// global-nav (DESIGN.md): barra escura, fina, quase invisível — o conteúdo é quem fala.
+.nav-global {
+  background: var(--color-surface-black) !important;
+  color: var(--color-on-dark) !important;
+  height: 52px;
+  padding: 0 var(--spacing-lg);
+  gap: var(--spacing-lg);
+}
+
+.titulo {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.links a {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  padding: 6px 2px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.links a:hover {
+  color: var(--color-on-dark);
+}
+
+.link-ativo {
+  color: var(--color-on-dark) !important;
+  border-bottom-color: var(--color-primary-focus);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.usuario {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.acao-sair {
+  color: var(--color-on-dark) !important;
+  font-size: 12px;
+}
+
+.conteudo {
+  padding: var(--spacing-xl) var(--spacing-lg);
+  max-width: 1100px;
+  margin: 0 auto;
+  min-height: calc(100vh - 52px);
+}

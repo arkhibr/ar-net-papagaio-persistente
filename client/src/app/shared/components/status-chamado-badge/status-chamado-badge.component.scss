@@ -1,0 +1,17 @@
+// Pílula "quieta" (DESIGN.md: rounded.pill, typography.caption) — fundo em tinta suave e texto
+// na própria cor, em vez de preenchimento sólido saturado, para manter a estética discreta do
+// sistema mesmo precisando de mais de uma cor semântica (status/prioridade são a exceção
+// deliberada à regra de "uma única cor de destaque").
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.cor-aberto { background: #e3f0fc; color: #0058ad; }
+.cor-em-atendimento { background: #fdf1e0; color: #b06a00; }
+.cor-resolvido { background: #e4f3e6; color: #1e7a2e; }
+.cor-fechado { background: #ececed; color: #5c5c5e; }

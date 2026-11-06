@@ -1,0 +1,126 @@
+@* Página de login do backend (adaptacao-bff-angular.md, B10). Fica no BFF, não no Angular: o
+   Angular só faz navegação de página inteira para /auth/login, como fará com o IdP (arquitetura/17:
+   o Angular não controla o protocolo). Razor codifica todo valor dinâmico. A seção de personas só é
+   renderizada em Development (decisão D5). *@
+@model Api.Bff.PaginaDeLoginModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · Chamados de TI</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; margin: 0; padding: 2rem 1rem; color: #1f1f1f; }
+  main { max-width: 26rem; margin: 0 auto; }
+  .card { background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.12); margin-bottom: 1.5rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+  label { display: block; margin: .75rem 0 .25rem; font-weight: 500; }
+  input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: .55rem; border: 1px solid #bbb; border-radius: 4px; font-size: 1rem; }
+  button { margin-top: 1rem; padding: .55rem 1.2rem; border: 0; border-radius: 4px; background: #3f51b5; color: #fff; font-size: 1rem; cursor: pointer; }
+  button.secundario { background: #e0e0e0; color: #1f1f1f; margin-top: 0; }
+  .erro { color: #b00020; margin: .5rem 0 0; }
+  .personas li { display: flex; gap: .5rem; align-items: center; justify-content: space-between; margin: .4rem 0; }
+  .papeis label { display: inline; font-weight: normal; margin-right: .75rem; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+<h1>Chamados de TI</h1>
+<form method="post" action="/auth/login">
+@Html.AntiForgeryToken()
+<input type="hidden" name="returnUrl" value="@Model.ReturnUrl">
+<label for="login">Login</label>
+<input type="text" id="login" name="login" autocomplete="username" required autofocus>
+<label for="senha">Senha</label>
+<input type="password" id="senha" name="senha" autocomplete="current-password" required>
+@if (Model.Erro is not null)
+{
+<p class="erro" role="alert">@Model.Erro</p>
+}
+<button type="submit">Entrar</button>
+</form>
+</div>
+@if (Model.Desenvolvimento)
+{
+<div class="card" id="dev" data-return-url="@Model.ReturnUrl">
+<h2>Entrar como (desenvolvimento)</h2>
+<small>Só existe em Development. Personas guardadas neste navegador.</small>
+<ul class="personas" id="personas"></ul>
+<form id="nova-persona">
+<label for="apelido">Apelido</label>
+<input type="text" id="apelido" required>
+<label for="userId">UserId (Guid)</label>
+<input type="text" id="userId" required>
+<div class="papeis">
+<label><input type="checkbox" value="Solicitante" checked> Solicitante</label>
+<label><input type="checkbox" value="Tecnico"> Técnico</label>
+<label><input type="checkbox" value="Supervisor"> Supervisor</label>
+</div>
+<button type="submit">Salvar persona</button>
+<button type="button" class="secundario" id="gerar-guid">Gerar Guid</button>
+</form>
+<p class="erro" id="dev-erro"></p>
+</div>
+<script>
+(() => {
+  const CHAVE = 'dev-personas';
+  const painel = document.getElementById('dev');
+  const lista = document.getElementById('personas');
+  const erro = document.getElementById('dev-erro');
+  const returnUrl = painel.dataset.returnUrl || '/';
+  const ler = () => { try { return JSON.parse(localStorage.getItem(CHAVE) || '[]'); } catch { return []; } };
+  const gravar = (p) => localStorage.setItem(CHAVE, JSON.stringify(p));
+
+  function desenhar() {
+    lista.replaceChildren();
+    for (const persona of ler()) {
+      const li = document.createElement('li');
+      const texto = document.createElement('span');
+      texto.textContent = `${persona.apelido} (${persona.papeis.join(', ')})`;
+      const entrar = document.createElement('button');
+      entrar.textContent = 'Entrar';
+      entrar.type = 'button';
+      entrar.onclick = () => entrarComo(persona);
+      const remover = document.createElement('button');
+      remover.textContent = 'Remover';
+      remover.type = 'button';
+      remover.className = 'secundario';
+      remover.onclick = () => { gravar(ler().filter(p => p.userId !== persona.userId)); desenhar(); };
+      li.append(texto, entrar, remover);
+      lista.append(li);
+    }
+  }
+
+  async function entrarComo(persona) {
+    erro.textContent = '';
+    const resposta = await fetch('/dev/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: persona.userId, roles: persona.papeis, nome: persona.apelido }),
+    });
+    if (resposta.ok) { window.location.assign(returnUrl); }
+    else { erro.textContent = `Falha no login de desenvolvimento (${resposta.status}).`; }
+  }
+
+  document.getElementById('gerar-guid').onclick = () => { document.getElementById('userId').value = crypto.randomUUID(); };
+  document.getElementById('nova-persona').onsubmit = (evento) => {
+    evento.preventDefault();
+    const papeis = [...document.querySelectorAll('#nova-persona input[type=checkbox]:checked')].map(c => c.value);
+    const persona = { apelido: document.getElementById('apelido').value.trim(), userId: document.getElementById('userId').value.trim(), papeis };
+    gravar([...ler().filter(p => p.userId !== persona.userId), persona]);
+    evento.target.reset();
+    desenhar();
+  };
+  desenhar();
+})();
+</script>
+}
+</main>
+</body>
+</html>

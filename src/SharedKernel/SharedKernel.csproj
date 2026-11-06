@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SharedKernel</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" />
+    <!-- Só Mediator.Abstractions: SharedKernel usa os tipos (IRequest<,>, IPipelineBehavior<,>,
+         IMessage, ISender, Unit), mas não tem nenhum IRequestHandler/INotificationHandler
+         próprio, então nunca precisou de Mediator.SourceGenerator aqui — decisão revista nesta
+         rodada (api-e-composicao): manter o gerador neste projeto, além de gerar um
+         AddMediator() sem handler nenhum (inútil), colide em CS0121 (ambiguous call) com o
+         AddMediator() gerado por Chamados/Catalogo quando os três assemblies aparecem juntos
+         no grafo de referência da Api — dois métodos de extensão idênticos
+         (IServiceCollection, Action<MediatorOptions>?) no mesmo namespace
+         Microsoft.Extensions.DependencyInjection. Erro real encontrado montando Api.csproj,
+         não hipotético; resolve também o warning CS0436 registrado em pacotes.md ("reavaliar
+         em api-e-composicao se deveria ficar só no projeto edge"). -->
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
+  </ItemGroup>
+
+</Project>

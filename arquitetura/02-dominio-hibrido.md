@@ -35,6 +35,20 @@ O efeito colateral — persistência, publicação de evento, chamada externa �
 
 Corolário de imutabilidade: as mensagens que atravessam o pipeline (`Command`/`Query`/DTO) são imutáveis (`record`) — dado que trafega não muda no caminho (ver [`03-commands-e-queries.md`](03-commands-e-queries.md)).
 
+## Nota de aplicação
+
+Um sistema concreto pode divergir conscientemente da regra "o `Domain` não gera aleatoriedade" num ponto específico: **a identidade do agregado nasce dentro da própria factory** (`Guid.NewGuid()`, ou `Guid.CreateVersion7()` quando a ordenação por criação importa), em vez de chegar como parâmetro vindo da `Application`.
+
+O argumento é que a identidade faz parte do nascimento do agregado. Quem cria o agregado é o dono da sua identidade, e exigir que todo chamador gere e repasse o id espalha essa responsabilidade sem ganho de regra de negócio. A divergência vale só enquanto estas três condições se mantiverem:
+
+- O id gerado nunca participa de uma decisão de negócio (comparação, ordenação com significado, cálculo). Ele identifica, não decide; por isso o núcleo continua determinístico em tudo que importa para o invariante.
+- Nenhum teste de domínio depende do valor do id, só da existência de um id não vazio.
+- Nenhum fluxo precisa reproduzir o mesmo id: importação de dado legado, replay de eventos ou id fornecido pelo cliente para idempotência. Quando um desses fluxos aparecer, a factory ganha uma sobrecarga que recebe o `Guid` como parâmetro, e só esse fluxo a usa.
+
+Relógio, configuração e qualquer outra aleatoriedade continuam proibidos no `Domain`, sem exceção.
+
+Adotado nos módulos Chamados e Catalogo deste sistema (`Chamado.Abrir`, `CategoriaDeServico.Criar`); ver M12 em [`../achados.md`](../achados.md).
+
 ## Veja também
 
 - [`01-estrutura-de-projetos-monolito-modular.md`](01-estrutura-de-projetos-monolito-modular.md): módulo como unidade de fronteira
